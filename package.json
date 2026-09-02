@@ -1,0 +1,30 @@
+{
+  "name": "saklolo161-mobile",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "expo lint"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@rnmapbox/maps": "^10.3.5",
+    "axios": "^1.20.0",
+    "expo": "~57.0.19",
+    "expo-location": "~57.0.15",
+    "expo-status-bar": "~57.0.1",
+    "lucide-react-native": "^1.39.0",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "^5.9.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~57.0.2"
+  },
+  "private": true
+}

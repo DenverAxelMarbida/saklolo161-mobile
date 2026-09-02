@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "SAKLOLO 161",
+    "slug": "saklolo161-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#111A3A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mdrrmo.saklolo161"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#111A3A"
+      },
+      "package": "com.mdrrmo.saklolo161"
+    },
+    "plugins": [
+      "expo-location",
+      [
+        "@rnmapbox/maps",
+        {
+          "RNMapboxMapsDownloadToken": ""
+        }
+      ]
+    ]
+  }
+}
