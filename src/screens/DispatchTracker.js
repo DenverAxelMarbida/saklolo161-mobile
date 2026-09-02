@@ -13,19 +13,24 @@ import {
   CheckCircle2,
   MapPin,
 } from "lucide-react-native";
-import { MAPBOX_TOKEN, THEMES } from "../../lib/config";
+import { MAPBOX_TOKEN } from "../../lib/config";
+import { THEMES, LIGHT } from "../../lib/themes";
 import { getRecentIncidentIds } from "../../lib/storage";
 import useIncidentPolling from "../hooks/useIncidentPolling";
 
 let MapView;
 let MapboxCamera;
-let Marker;
+let PointAnnotation;
+let ShapeSource;
+let LineLayer;
 try {
   const mapbox = require("@rnmapbox/maps");
   const resolved = mapbox.default || mapbox;
-  MapView = resolved;
+  MapView = resolved.MapView;
   MapboxCamera = resolved.Camera;
-  Marker = resolved.Marker;
+  PointAnnotation = resolved.PointAnnotation;
+  ShapeSource = resolved.ShapeSource;
+  LineLayer = resolved.LineLayer;
 } catch {
   // Mapbox not available
 }
@@ -38,6 +43,11 @@ const STEP_INDEX = {
   "En Route": 2,
   Resolved: 3,
 };
+
+// Static demo station coordinate (Marikina City) — mirrors the web
+// dashboard's STATION_COORDS. A real build would source this from the
+// station record returned by the backend.
+const STATION_COORDS = { lat: 14.6455, lng: 121.101 };
 
 export default function DispatchTracker({ incidentId: propId, onBack }) {
   const [incidentId, setIncidentId] = useState(propId);
@@ -160,7 +170,7 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
                               color={isCurrent ? THEMES.white : THEMES.darkNavy}
                             />
                           ) : (
-                            <Circle size={16} color="rgba(255,255,255,0.2)" />
+                            <Circle size={16} color={LIGHT.textSecondary} />
                           )}
                         </View>
                         <Text
@@ -201,20 +211,69 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
                           ref={cameraRef}
                           defaultSettings={{
                             centerCoordinate: [
-                              incident.location.longitude,
-                              incident.location.latitude,
+                              (STATION_COORDS.lng + incident.location.longitude) / 2,
+                              (STATION_COORDS.lat + incident.location.latitude) / 2,
                             ],
-                            zoomLevel: 14,
+                            zoomLevel: 13,
                           }}
                           animationMode="none"
                         />
                       )}
-                      <Marker
-                        coordinate={[
-                          incident.location.longitude,
-                          incident.location.latitude,
-                        ]}
-                      />
+                      {ShapeSource && LineLayer && (
+                        <ShapeSource
+                          id="routeSource"
+                          shape={{
+                            type: "Feature",
+                            properties: {},
+                            geometry: {
+                              type: "LineString",
+                              coordinates: [
+                                [STATION_COORDS.lng, STATION_COORDS.lat],
+                                [
+                                  incident.location.longitude,
+                                  incident.location.latitude,
+                                ],
+                              ],
+                            },
+                          }}
+                        >
+                          <LineLayer
+                            id="routeLine"
+                            style={{
+                              lineColor: "#2f80ed",
+                              lineWidth: 3,
+                              lineDasharray: [0.5, 1.5],
+                              lineCap: "round",
+                              lineJoin: "round",
+                            }}
+                          />
+                        </ShapeSource>
+                      )}
+                      {PointAnnotation && (
+                        <PointAnnotation
+                          id="station-location"
+                          coordinate={[STATION_COORDS.lng, STATION_COORDS.lat]}
+                          anchor={{ x: 0.5, y: 0.5 }}
+                        >
+                          <View style={styles.pinWrap}>
+                            <View style={styles.stationPin} />
+                          </View>
+                        </PointAnnotation>
+                      )}
+                      {PointAnnotation && (
+                        <PointAnnotation
+                          id="incident-location"
+                          coordinate={[
+                            incident.location.longitude,
+                            incident.location.latitude,
+                          ]}
+                          anchor={{ x: 0.5, y: 0.5 }}
+                        >
+                          <View style={styles.pinWrap}>
+                            <View style={styles.incidentPin} />
+                          </View>
+                        </PointAnnotation>
+                      )}
                     </MapView>
                   </View>
                 ) : (
@@ -240,14 +299,14 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
                     style={[
                       styles.statusPill,
                       {
-                        backgroundColor:
+                          backgroundColor:
                           incident.status === "Resolved"
                             ? THEMES.mintGreen
                             : incident.status === "Dispatched"
                             ? "#FBBF24"
                             : incident.status === "En Route"
                             ? THEMES.floodBlue
-                            : "rgba(255,255,255,0.1)",
+                            : THEMES.gray,
                       },
                     ]}
                   >
@@ -311,7 +370,7 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0D1429",
+    backgroundColor: LIGHT.bg,
   },
   header: {
     flexDirection: "row",
@@ -405,7 +464,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: LIGHT.inputBg,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -416,22 +475,23 @@ const styles = StyleSheet.create({
     backgroundColor: THEMES.mintGreen,
     shadowColor: THEMES.mintGreen,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.4,
     shadowRadius: 8,
     elevation: 8,
   },
   stepLabel: {
     fontSize: 10,
-    color: "rgba(255,255,255,0.3)",
+    color: LIGHT.textSecondary,
     fontWeight: "600",
   },
   stepLabelComplete: {
-    color: THEMES.white,
+    color: THEMES.darkNavy,
+    fontWeight: "800",
   },
   stepLine: {
     width: 32,
     height: 2,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: LIGHT.border,
     marginBottom: 20,
     marginHorizontal: 4,
   },
@@ -441,40 +501,72 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: 16,
     marginTop: 12,
-    backgroundColor: THEMES.darkNavy,
-    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: LIGHT.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
   cardTitle: {
     fontSize: 14,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     fontWeight: "700",
     marginBottom: 12,
   },
   mapContainer: {
     borderRadius: 10,
     overflow: "hidden",
-    height: 180,
+    height: 260,
   },
   map: {
-    height: 180,
+    height: 260,
     borderRadius: 10,
   },
   mapPlaceholder: {
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: LIGHT.inputBg,
     justifyContent: "center",
     alignItems: "center",
     gap: 8,
   },
   placeholderText: {
-    color: THEMES.gray,
+    color: LIGHT.textSecondary,
     fontSize: 12,
+  },
+  pinWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  stationPin: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#2f80ed",
+  },
+  incidentPin: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#e4572e",
   },
   address: {
     fontSize: 13,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
+    fontWeight: "500",
     marginTop: 10,
   },
   detailRow: {
@@ -483,15 +575,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
+    borderBottomColor: LIGHT.border,
   },
   detailLabel: {
     fontSize: 13,
-    color: "rgba(255,255,255,0.5)",
+    color: LIGHT.textSecondary,
   },
   detailValue: {
     fontSize: 13,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     fontWeight: "600",
   },
   statusPill: {
@@ -507,11 +599,11 @@ const styles = StyleSheet.create({
   notesSection: {
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
+    borderBottomColor: LIGHT.border,
   },
   notesText: {
     fontSize: 13,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     marginTop: 4,
   },
   pickerContainer: {
@@ -521,32 +613,37 @@ const styles = StyleSheet.create({
   },
   pickerTitle: {
     fontSize: 20,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     fontWeight: "700",
     marginTop: 16,
   },
   pickerSubtitle: {
     fontSize: 13,
-    color: THEMES.gray,
+    color: LIGHT.textSecondary,
     marginTop: 4,
     marginBottom: 20,
   },
   emptyText: {
-    color: THEMES.gray,
+    color: LIGHT.textSecondary,
     fontSize: 14,
     textAlign: "center",
     marginTop: 40,
   },
   pickerItem: {
-    backgroundColor: THEMES.darkNavy,
+    backgroundColor: "#FFFFFF",
     borderRadius: 12,
     padding: 16,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: LIGHT.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   pickerItemId: {
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     fontSize: 14,
     fontWeight: "600",
     fontFamily: "monospace",

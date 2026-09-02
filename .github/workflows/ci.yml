@@ -23,4 +23,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # TODO: add expo-doctor / expo export once core screens land
+      - name: Doctor
+        run: npx expo-doctor
+
+      - name: Build Sanity Check (expo export)
+        run: npx expo export --platform android --output-dir .expo-ci-check

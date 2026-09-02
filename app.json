@@ -5,22 +5,23 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#111A3A"
-    },
+    "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mdrrmo.saklolo161"
+      "bundleIdentifier": "com.mdrrmo.saklolo161",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#111A3A"
       },
-      "package": "com.mdrrmo.saklolo161"
+      "package": "com.mdrrmo.saklolo161",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "plugins": [
       "expo-location",
@@ -29,7 +30,14 @@
         {
           "RNMapboxMapsDownloadToken": ""
         }
-      ]
-    ]
+      ],
+      "expo-status-bar"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7a2bda9e-9667-40f3-9656-b772aa5e14ec"
+      }
+    },
+    "owner": "denver-axel"
   }
 }

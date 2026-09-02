@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Linking,
   RefreshControl,
+  Image,
 } from "react-native";
 import {
   Phone,
@@ -20,7 +21,8 @@ import {
   Siren,
 } from "lucide-react-native";
 import axios from "axios";
-import { API_BASE_URL, CATEGORY_DISPLAY, CATEGORY_COLORS, THEMES } from "../../lib/config";
+import { API_BASE_URL, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
+import { THEMES, LIGHT } from "../../lib/themes";
 import { DISTRESS_NUMBERS } from "../../lib/hotlines";
 
 const FALLBACK_WEATHER = {
@@ -87,7 +89,7 @@ export default function HomeDashboard({ onCategoryPress }) {
         <RefreshControl
           refreshing={refreshing}
           onRefresh={onRefresh}
-          tintColor={THEMES.white}
+          tintColor={THEMES.darkNavy}
         />
       }
     >
@@ -96,9 +98,11 @@ export default function HomeDashboard({ onCategoryPress }) {
           <Text style={styles.eyebrow}>MARIKINA CITY MDRRMO</Text>
           <Text style={styles.title}>SAKLOLO 161</Text>
         </View>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>MC</Text>
-        </View>
+        <Image
+          source={require("../../assets/icon.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
       </View>
 
       <View style={styles.heroCard}>
@@ -145,11 +149,11 @@ export default function HomeDashboard({ onCategoryPress }) {
           return (
             <TouchableOpacity
               key={key}
-              style={[styles.categoryCard, { borderColor: color }]}
+              style={[styles.categoryCard, { backgroundColor: color }]}
               onPress={() => onCategoryPress(key)}
-              activeOpacity={0.7}
+              activeOpacity={0.85}
             >
-              <View style={[styles.categoryIconWrap, { backgroundColor: color }]}>
+              <View style={styles.categoryIconWrap}>
                 <Icon size={24} color={THEMES.white} />
               </View>
               <Text style={styles.categoryLabel}>{label.toUpperCase()}</Text>
@@ -167,7 +171,7 @@ export default function HomeDashboard({ onCategoryPress }) {
             onPress={() => handleDistressCall(number)}
             activeOpacity={0.7}
           >
-            <Phone size={18} color={THEMES.white} />
+            <Phone size={18} color={THEMES.fireRed} />
             <Text style={styles.distressLabel}>{key.replace("_", " ")}</Text>
             <Text style={styles.distressNumber}>{number}</Text>
           </TouchableOpacity>
@@ -187,7 +191,7 @@ export default function HomeDashboard({ onCategoryPress }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0D1429",
+    backgroundColor: LIGHT.bg,
   },
   topBar: {
     flexDirection: "row",
@@ -210,18 +214,11 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 2,
   },
-  avatar: {
+  logo: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: THEMES.mintGreen,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  avatarText: {
-    color: THEMES.darkNavy,
-    fontWeight: "700",
-    fontSize: 14,
   },
   heroCard: {
     marginHorizontal: 16,
@@ -231,6 +228,11 @@ const styles = StyleSheet.create({
     padding: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
   },
   weatherRow: {
     flexDirection: "row",
@@ -297,7 +299,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 12,
-    color: "rgba(255,255,255,0.4)",
+    color: LIGHT.textSecondary,
     fontWeight: "600",
     letterSpacing: 1,
     marginTop: 24,
@@ -312,24 +314,28 @@ const styles = StyleSheet.create({
   },
   categoryCard: {
     width: "47%",
-    backgroundColor: THEMES.darkNavy,
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 16,
-    borderWidth: 1,
     alignItems: "center",
-    gap: 10,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   categoryIconWrap: {
     width: 48,
     height: 48,
-    borderRadius: 14,
+    borderRadius: 24,
+    backgroundColor: "rgba(255,255,255,0.25)",
     justifyContent: "center",
     alignItems: "center",
   },
   categoryLabel: {
     color: THEMES.white,
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
     letterSpacing: 0.5,
   },
   distressRow: {
@@ -339,18 +345,23 @@ const styles = StyleSheet.create({
   },
   distressBtn: {
     flex: 1,
-    backgroundColor: THEMES.darkNavy,
-    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
     padding: 14,
     alignItems: "center",
     gap: 4,
     borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.3)",
+    borderColor: "rgba(239,68,68,0.25)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
   },
   distressLabel: {
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     fontSize: 10,
-    fontWeight: "600",
+    fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },

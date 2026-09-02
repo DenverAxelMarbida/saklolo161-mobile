@@ -19,18 +19,19 @@ import {
 } from "lucide-react-native";
 import axios from "axios";
 import * as Location from "expo-location";
-import { API_BASE_URL, MAPBOX_TOKEN, CATEGORY_DISPLAY, CATEGORY_COLORS, THEMES } from "../../lib/config";
+import { API_BASE_URL, MAPBOX_TOKEN, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
+import { THEMES, LIGHT } from "../../lib/themes";
 import { getSavedPhone, savePhone, saveIncidentId } from "../../lib/storage";
 
 let MapView;
 let MapboxCamera;
-let Marker;
+let PointAnnotation;
 try {
   const mapbox = require("@rnmapbox/maps");
   const resolved = mapbox.default || mapbox;
-  MapView = resolved;
+  MapView = resolved.MapView;
   MapboxCamera = resolved.Camera;
-  Marker = resolved.Marker;
+  PointAnnotation = resolved.PointAnnotation;
 } catch {
   // Mapbox not available
 }
@@ -180,7 +181,17 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                     animationMode="none"
                   />
                 )}
-                <Marker coordinate={[location.longitude, location.latitude]} />
+                {PointAnnotation && (
+                  <PointAnnotation
+                    id="incident-location"
+                    coordinate={[location.longitude, location.latitude]}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                  >
+                    <View style={styles.pinWrap}>
+                      <View style={styles.incidentPin} />
+                    </View>
+                  </PointAnnotation>
+                )}
               </MapView>
             ) : (
               <View style={[styles.miniMap, styles.mapPlaceholder]}>
@@ -196,7 +207,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         )}
         <View style={styles.locationInfo}>
           <View style={[styles.gpsBadge, gpsLocked && styles.gpsBadgeLocked]}>
-            <Navigation size={10} color={gpsLocked ? THEMES.darkNavy : THEMES.white} />
+            <Navigation size={10} color={gpsLocked ? THEMES.darkNavy : LIGHT.textSecondary} />
             <Text style={[styles.gpsText, gpsLocked && styles.gpsTextLocked]}>
               GPS {gpsLocked ? "Locked" : "Pending"}
             </Text>
@@ -242,7 +253,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
           value={phone}
           onChangeText={setPhone}
           placeholder="+639XXXXXXXXX"
-          placeholderTextColor="rgba(255,255,255,0.3)"
+          placeholderTextColor={LIGHT.textSecondary}
           keyboardType="phone-pad"
         />
 
@@ -252,7 +263,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
           value={notes}
           onChangeText={setNotes}
           placeholder="Describe what you see..."
-          placeholderTextColor="rgba(255,255,255,0.3)"
+          placeholderTextColor={LIGHT.textSecondary}
           multiline
           numberOfLines={3}
         />
@@ -298,7 +309,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0D1429",
+    backgroundColor: LIGHT.bg,
   },
   header: {
     flexDirection: "row",
@@ -350,36 +361,61 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: 16,
     marginTop: 16,
-    backgroundColor: THEMES.darkNavy,
-    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: LIGHT.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
   cardTitle: {
     fontSize: 14,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     fontWeight: "700",
     marginBottom: 12,
   },
   miniMapContainer: {
     borderRadius: 10,
     overflow: "hidden",
-    height: 160,
+    height: 240,
   },
   miniMap: {
-    height: 160,
+    height: 240,
     borderRadius: 10,
   },
   mapPlaceholder: {
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: LIGHT.inputBg,
     justifyContent: "center",
     alignItems: "center",
     gap: 6,
   },
   mapPlaceholderText: {
-    color: THEMES.gray,
+    color: LIGHT.textSecondary,
     fontSize: 12,
+  },
+  pinWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  incidentPin: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#e4572e",
   },
   locationInfo: {
     marginTop: 10,
@@ -390,7 +426,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     gap: 4,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: LIGHT.inputBg,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
@@ -402,18 +438,20 @@ const styles = StyleSheet.create({
   gpsText: {
     fontSize: 10,
     fontWeight: "700",
-    color: THEMES.white,
+    color: LIGHT.textSecondary,
   },
   gpsTextLocked: {
     color: THEMES.darkNavy,
+    fontWeight: "800",
   },
   address: {
     fontSize: 13,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
+    fontWeight: "500",
   },
   coords: {
     fontSize: 11,
-    color: THEMES.gray,
+    color: LIGHT.textSecondary,
   },
   detailRow: {
     flexDirection: "row",
@@ -421,15 +459,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
+    borderBottomColor: LIGHT.border,
   },
   detailLabel: {
     fontSize: 13,
-    color: "rgba(255,255,255,0.5)",
+    color: LIGHT.textSecondary,
   },
   detailValue: {
     fontSize: 13,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     fontWeight: "600",
   },
   miniBadge: {
@@ -443,10 +481,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   input: {
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: LIGHT.inputBg,
     borderRadius: 10,
     padding: 12,
-    color: THEMES.white,
+    color: LIGHT.textPrimary,
     fontSize: 14,
     marginTop: 6,
   },
@@ -460,22 +498,22 @@ const styles = StyleSheet.create({
   },
   evidenceBtn: {
     flex: 1,
-    backgroundColor: "rgba(255,255,255,0.04)",
+    backgroundColor: LIGHT.inputBg,
     borderRadius: 12,
     padding: 16,
     alignItems: "center",
     gap: 6,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: LIGHT.border,
     borderStyle: "dashed",
   },
   evidenceLabel: {
-    color: THEMES.gray,
+    color: LIGHT.textPrimary,
     fontSize: 12,
     fontWeight: "600",
   },
   evidenceStub: {
-    color: "rgba(255,255,255,0.2)",
+    color: LIGHT.textSecondary,
     fontSize: 10,
   },
   submitBtn: {
@@ -488,6 +526,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   submitBtnDisabled: {
     opacity: 0.6,
