@@ -125,7 +125,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         if (phone.trim() !== (await getSavedPhone())) {
           await savePhone(phone.trim());
         }
-        onSubmit(incident.incidentId);
+        onSubmit(incident);
       }
     } catch (err) {
       Alert.alert(
