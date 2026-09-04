@@ -11,7 +11,7 @@ import { ArrowLeft, MapPin, ShieldCheck } from "lucide-react-native";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { getResolvedIncidents } from "../../lib/storage";
 
-export default function ResolvedLog({ onBack }) {
+export default function ResolvedLog({ onBack, onSelect }) {
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -60,7 +60,12 @@ export default function ResolvedLog({ onBack }) {
           showsVerticalScrollIndicator={false}
         >
           {incidents.map((inc) => (
-            <View key={inc.incidentId} style={styles.card}>
+            <TouchableOpacity
+              key={inc.incidentId}
+              style={styles.card}
+              onPress={() => onSelect && onSelect(inc)}
+              activeOpacity={0.7}
+            >
               <View style={styles.cardTop}>
                 <Text style={styles.refNumber}>{inc.incidentId}</Text>
                 <View style={styles.resolvedChip}>
@@ -84,7 +89,10 @@ export default function ResolvedLog({ onBack }) {
                     : ""}
                 </Text>
               </View>
-            </View>
+              <View style={styles.detailHint}>
+                <Text style={styles.detailHintText}>View details</Text>
+              </View>
+            </TouchableOpacity>
           ))}
         </ScrollView>
       )}
@@ -211,5 +219,17 @@ const styles = StyleSheet.create({
   time: {
     fontSize: 11,
     color: LIGHT.textSecondary,
+  },
+  detailHint: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: LIGHT.border,
+    alignItems: "flex-end",
+  },
+  detailHintText: {
+    fontSize: 12,
+    color: THEMES.floodBlue,
+    fontWeight: "700",
   },
 });

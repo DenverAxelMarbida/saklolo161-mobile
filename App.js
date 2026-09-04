@@ -14,6 +14,7 @@ import HomeDashboard from "./src/screens/HomeDashboard";
 import IncidentForm from "./src/screens/IncidentForm";
 import DispatchTracker from "./src/screens/DispatchTracker";
 import ResolvedLog from "./src/screens/ResolvedLog";
+import ResolvedDetail from "./src/screens/ResolvedDetail";
 import { THEMES } from "./lib/themes";
 import { MAPBOX_TOKEN } from "./lib/config";
 
@@ -37,6 +38,7 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [incidentData, setIncidentData] = useState(null);
   const [isOffline, setIsOffline] = useState(false);
+  const [resolvedIncident, setResolvedIncident] = useState(null);
 
   useEffect(() => {
     if (MAPBOX_TOKEN && Mapbox && typeof Mapbox.setAccessToken === "function") {
@@ -70,6 +72,7 @@ export default function App() {
     setScreen("home");
     setSelectedCategory(null);
     setIncidentData(null);
+    setResolvedIncident(null);
   }, []);
 
   function goTracker() {
@@ -78,8 +81,24 @@ export default function App() {
     setScreen("tracker");
   }
 
+  function openResolvedDetail(incident) {
+    setResolvedIncident(incident || null);
+    setScreen("resolvedDetail");
+  }
+
+  const goHistory = useCallback(() => {
+    setSelectedCategory(null);
+    setIncidentData(null);
+    setResolvedIncident(null);
+    setScreen("history");
+  }, []);
+
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (screen === "resolvedDetail") {
+        goHistory();
+        return true;
+      }
       if (screen === "form" || screen === "tracker" || screen === "history") {
         goHome();
         return true;
@@ -87,7 +106,7 @@ export default function App() {
       return false;
     });
     return () => sub.remove();
-  }, [screen, goHome]);
+  }, [screen, goHome, goHistory]);
 
   function handleTabPress(tab) {
     if (tab === "home") {
@@ -97,16 +116,14 @@ export default function App() {
     } else if (tab === "track") {
       goTracker();
     } else if (tab === "history") {
-      setSelectedCategory(null);
-      setIncidentData(null);
-      setScreen("history");
+      goHistory();
     }
   }
 
   function activeTab() {
     if (screen === "tracker") return "track";
     if (screen === "form") return "report";
-    if (screen === "history") return "history";
+    if (screen === "history" || screen === "resolvedDetail") return "history";
     return "home";
   }
 
@@ -143,7 +160,12 @@ export default function App() {
               onBack={goHome}
             />
           )}
-          {screen === "history" && <ResolvedLog onBack={goHome} />}
+          {screen === "history" && (
+            <ResolvedLog onBack={goHistory} onSelect={openResolvedDetail} />
+          )}
+          {screen === "resolvedDetail" && (
+            <ResolvedDetail incident={resolvedIncident} onBack={goHistory} />
+          )}
         </View>
 
         <View style={styles.tabBar}>
