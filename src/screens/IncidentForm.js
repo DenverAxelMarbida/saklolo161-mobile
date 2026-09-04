@@ -47,8 +47,8 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   const [notes, setNotes] = useState("");
   const [location, setLocation] = useState(INITIAL_LOCATION);
   const [loading, setLoading] = useState(false);
-  const [gpsLocked, setGpsLocked] = useState(false);
-  const locationFetched = useRef(false);
+  const [gpsStatus, setGpsStatus] = useState("locating"); // "locating" | "locked" | "failed"
+  const gpsAttempts = useRef(0);
   const cameraRef = useRef(null);
 
   function onMapLoaded() {
@@ -61,50 +61,75 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
     }
   }
 
+  async function acquireGps() {
+    setGpsStatus("locating");
+    gpsAttempts.current = 0;
+
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setGpsStatus("failed");
+        return;
+      }
+
+      let pos = null;
+      while (gpsAttempts.current < 3 && !pos) {
+        gpsAttempts.current += 1;
+        try {
+          pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+            timeout: 8000,
+            maximumAge: 10000,
+          });
+        } catch {
+          // attempt failed — retry after a short pause for the next loop
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+        }
+      }
+
+      if (!pos) {
+        setGpsStatus("failed");
+        return;
+      }
+
+      const { latitude, longitude } = pos.coords;
+
+      let address = "Marikina City, Philippines";
+      try {
+        const geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
+        if (geocode.length > 0) {
+          const g = geocode[0];
+          address = [g.name, g.street, g.city, g.region].filter(Boolean).join(", ");
+        }
+      } catch {
+        // geocode failed, use default
+      }
+
+      setLocation({ latitude, longitude, address });
+      setGpsStatus("locked");
+    } catch {
+      setGpsStatus("failed");
+    }
+  }
+
   useEffect(() => {
     (async () => {
       const saved = await getSavedPhone();
       if (saved) setPhone(saved);
-
-      if (locationFetched.current) return;
-      locationFetched.current = true;
-
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === "granted") {
-          const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          const { latitude, longitude } = pos.coords;
-
-          let address = "Marikina City, Philippines";
-          try {
-            const geocode = await Location.reverseGeocodeAsync({
-              latitude,
-              longitude,
-            });
-            if (geocode.length > 0) {
-              const g = geocode[0];
-              address = [g.name, g.street, g.city, g.region]
-                .filter(Boolean)
-                .join(", ");
-            }
-          } catch {
-            // geocode failed, use default
-          }
-
-          setLocation({ latitude, longitude, address });
-          setGpsLocked(true);
-        }
-      } catch {
-        // GPS failed, use initial
-      }
+      acquireGps();
     })();
   }, []);
 
   async function handleSubmit() {
     if (!phone.trim()) {
       Alert.alert("Phone Required", "Enter your phone number to submit.");
+      return;
+    }
+    if (gpsStatus !== "locked") {
+      Alert.alert(
+        "Location Not Ready",
+        "Your GPS location has not been locked yet. Wait for it to finish, or tap Retry GPS."
+      );
       return;
     }
     setLoading(true);
@@ -206,16 +231,32 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
           </View>
         )}
         <View style={styles.locationInfo}>
-          <View style={[styles.gpsBadge, gpsLocked && styles.gpsBadgeLocked]}>
-            <Navigation size={10} color={gpsLocked ? THEMES.darkNavy : LIGHT.textSecondary} />
-            <Text style={[styles.gpsText, gpsLocked && styles.gpsTextLocked]}>
-              GPS {gpsLocked ? "Locked" : "Pending"}
+          <View style={[styles.gpsBadge, gpsStatus === "locked" && styles.gpsBadgeLocked, gpsStatus === "failed" && styles.gpsBadgeError]}>
+            <Navigation size={10} color={gpsStatus === "locked" ? THEMES.darkNavy : gpsStatus === "failed" ? THEMES.fireRed : LIGHT.textSecondary} />
+            <Text style={[styles.gpsText, gpsStatus === "locked" && styles.gpsTextLocked, gpsStatus === "failed" && styles.gpsTextError]}>
+              {gpsStatus === "locked"
+                ? "GPS Locked"
+                : gpsStatus === "failed"
+                ? "GPS Failed"
+                : "Acquiring GPS…"}
             </Text>
           </View>
-          <Text style={styles.address}>{location.address}</Text>
-          <Text style={styles.coords}>
-            {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+          {gpsStatus !== "locked" && (
+            <TouchableOpacity onPress={acquireGps} style={styles.gpsRetryBtn} activeOpacity={0.7}>
+              <Navigation size={10} color={THEMES.darkNavy} />
+              <Text style={styles.gpsRetryText}>
+                {gpsStatus === "failed" ? "Retry GPS" : "Refresh GPS"}
+              </Text>
+            </TouchableOpacity>
+          )}
+          <Text style={[styles.address, gpsStatus !== "locked" && { color: LIGHT.textSecondary }]}>
+            {gpsStatus === "locked" ? location.address : "Waiting for your location…"}
           </Text>
+          {gpsStatus === "locked" && (
+            <Text style={styles.coords}>
+              {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+            </Text>
+          )}
         </View>
       </View>
 
@@ -286,9 +327,12 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
       </View>
 
       <TouchableOpacity
-        style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
+        style={[
+          styles.submitBtn,
+          (loading || gpsStatus !== "locked") && styles.submitBtnDisabled,
+        ]}
         onPress={handleSubmit}
-        disabled={loading}
+        disabled={loading || gpsStatus !== "locked"}
         activeOpacity={0.8}
       >
         {loading ? (
@@ -296,7 +340,13 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         ) : (
           <>
             <Send size={18} color={THEMES.white} />
-            <Text style={styles.submitText}>SUBMIT REPORT</Text>
+            <Text style={styles.submitText}>
+              {gpsStatus !== "locked"
+                ? gpsStatus === "failed"
+                  ? "WAITING FOR GPS"
+                  : "ACQUIRING LOCATION…"
+                : "SUBMIT REPORT"}
+            </Text>
           </>
         )}
       </TouchableOpacity>
@@ -435,6 +485,11 @@ const styles = StyleSheet.create({
   gpsBadgeLocked: {
     backgroundColor: THEMES.mintGreen,
   },
+  gpsBadgeError: {
+    backgroundColor: "rgba(239,68,68,0.12)",
+    borderWidth: 1,
+    borderColor: THEMES.fireRed,
+  },
   gpsText: {
     fontSize: 10,
     fontWeight: "700",
@@ -443,6 +498,26 @@ const styles = StyleSheet.create({
   gpsTextLocked: {
     color: THEMES.darkNavy,
     fontWeight: "800",
+  },
+  gpsTextError: {
+    color: THEMES.fireRed,
+    fontWeight: "800",
+  },
+  gpsRetryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 4,
+    backgroundColor: "rgba(16,185,129,0.15)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  gpsRetryText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: THEMES.darkNavy,
   },
   address: {
     fontSize: 13,
