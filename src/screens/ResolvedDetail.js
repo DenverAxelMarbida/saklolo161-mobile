@@ -45,8 +45,9 @@ function formatTimestamp(isoString) {
 }
 
 export default function ResolvedDetail({ incident, onBack }) {
-  const categoryKey = incident.category;
-  const categoryDisplay = CATEGORY_DISPLAY[categoryKey] || categoryKey;
+  const rawCategory = incident.category;
+  const categoryKey = (rawCategory || "").toUpperCase();
+  const categoryDisplay = CATEGORY_DISPLAY[categoryKey] || rawCategory;
   const categoryColor = CATEGORY_COLORS[categoryKey] || THEMES.crimeSlate;
 
   const lat = incident.location?.latitude;
