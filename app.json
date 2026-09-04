@@ -25,13 +25,16 @@
     },
     "plugins": [
       "expo-location",
+      "@rnmapbox/maps",
+      "expo-status-bar",
       [
-        "@rnmapbox/maps",
+        "expo-splash-screen",
         {
-          "RNMapboxMapsDownloadToken": ""
+          "image": "./assets/icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#111A3A"
         }
-      ],
-      "expo-status-bar"
+      ]
     ],
     "extra": {
       "eas": {

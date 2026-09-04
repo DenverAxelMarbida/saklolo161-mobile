@@ -173,7 +173,6 @@ export default function HomeDashboard({ onCategoryPress }) {
           >
             <Phone size={18} color={THEMES.fireRed} />
             <Text style={styles.distressLabel}>{key.replace("_", " ")}</Text>
-            <Text style={styles.distressNumber}>{number}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -364,11 +363,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-  },
-  distressNumber: {
-    color: THEMES.fireRed,
-    fontSize: 16,
-    fontWeight: "800",
   },
   locationPill: {
     flexDirection: "row",

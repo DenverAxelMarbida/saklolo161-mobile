@@ -49,14 +49,41 @@ const STEP_INDEX = {
 // station record returned by the backend.
 const STATION_COORDS = { lat: 14.6455, lng: 121.101 };
 
-export default function DispatchTracker({ incidentId: propId, onBack }) {
+export default function DispatchTracker({
+  incidentId: propId,
+  initialIncident,
+  onBack,
+}) {
   const [incidentId, setIncidentId] = useState(propId);
   const [recentIds, setRecentIds] = useState([]);
   const [showPicker, setShowPicker] = useState(!propId);
   const cameraRef = useRef(null);
 
+  // Immediately use the incident passed in from the submit screen so the
+  // map shows the pinned location + route without waiting for the poll.
+  // Polling still runs in parallel to pick up live status updates.
+  const { incident, error, notFound } = useIncidentPolling(incidentId);
+  const liveIncident = incident || initialIncident;
+
+  // Stable camera target so re-renders (10s polling) don't re-center the
+  // map over the user's manual pan/swipe. Only recompute when the actual
+  // coordinates change (primitive deps keep identity stable per incident).
+  const incidentLng = liveIncident?.location?.longitude;
+  const incidentLat = liveIncident?.location?.latitude;
+  const cameraDefaults = React.useMemo(() => {
+    if (!liveIncident) return null;
+    return {
+      centerCoordinate: [
+        (STATION_COORDS.lng + (incidentLng ?? 0)) / 2,
+        (STATION_COORDS.lat + (incidentLat ?? 0)) / 2,
+      ],
+      zoomLevel: 13,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incidentLng, incidentLat]);
+
   useEffect(() => {
-    if (!propId) {
+    if (!propId && !initialIncident) {
       (async () => {
         const ids = await getRecentIncidentIds();
         setRecentIds(ids);
@@ -66,34 +93,19 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
         }
       })();
     }
-  }, [propId]);
-
-  const { incident, error } = useIncidentPolling(incidentId);
+  }, [propId, initialIncident]);
 
   function handleSelectId(id) {
     setIncidentId(id);
     setShowPicker(false);
   }
 
-  function onMapLoaded() {
-    if (cameraRef.current && incident) {
-      cameraRef.current.setCamera({
-        centerCoordinate: [
-          incident.location.longitude,
-          incident.location.latitude,
-        ],
-        zoomLevel: 14,
-        animationMode: "none",
-      });
-    }
-  }
-
-  const currentStepIdx = incident
-    ? STEP_INDEX[incident.status] ?? 0
+  const currentStepIdx = liveIncident
+    ? STEP_INDEX[liveIncident.status] ?? 0
     : -1;
 
   return (
-    <ScrollView style={styles.container}>
+    <View style={styles.container}>
       {showPicker ? (
         <View style={styles.pickerContainer}>
           <TouchableOpacity onPress={onBack} style={styles.backBtn}>
@@ -106,16 +118,18 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
           {recentIds.length === 0 ? (
             <Text style={styles.emptyText}>No recent incidents found.</Text>
           ) : (
-            recentIds.map((id) => (
-              <TouchableOpacity
-                key={id}
-                style={styles.pickerItem}
-                onPress={() => handleSelectId(id)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.pickerItemId}>{id}</Text>
-              </TouchableOpacity>
-            ))
+            <ScrollView>
+              {recentIds.map((id) => (
+                <TouchableOpacity
+                  key={id}
+                  style={styles.pickerItem}
+                  onPress={() => handleSelectId(id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.pickerItemId}>{id}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           )}
           <View style={{ height: 40 }} />
         </View>
@@ -126,7 +140,7 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
               <ArrowLeft size={20} color={THEMES.white} />
             </TouchableOpacity>
             <View style={styles.headerInfo}>
-              <Text style={styles.refNumber}>{incidentId}</Text>
+              <Text style={styles.refNumber}>{incidentId || "New"}</Text>
               <Text style={styles.headerTitle}>Dispatch Tracker</Text>
             </View>
             <View style={styles.liveBadge}>
@@ -135,21 +149,124 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
             </View>
           </View>
 
+          {notFound && (
+            <View style={styles.notFoundBanner}>
+              <Text style={styles.notFoundTitle}>Report no longer tracked</Text>
+              <Text style={styles.notFoundText}>
+                This report is no longer available from the dispatcher
+                system. You can still see it in your history.
+              </Text>
+            </View>
+          )}
+
           {error && (
             <View style={styles.errorBanner}>
               <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
 
-          {!incident && !error && (
+          {!liveIncident && !error && !notFound && (
             <View style={styles.loadingContainer}>
               <ActivityIndicator color={THEMES.mintGreen} size="large" />
               <Text style={styles.loadingText}>Fetching status...</Text>
             </View>
           )}
 
-          {incident && (
-            <>
+          {liveIncident && (
+            <View style={styles.trackerBody}>
+              {MAPBOX_TOKEN && MapView ? (
+                <View style={styles.mapSection}>
+                  <MapView
+                    style={styles.heroMap}
+                    styleURL="mapbox://styles/mapbox/streets-v12"
+                    scrollEnabled={true}
+                    pitchEnabled={true}
+                    rotateEnabled={true}
+                    compassEnabled={true}
+                    requestDisallowInterceptTouchEvent={true}
+                  >
+                    {MapboxCamera && (
+                      <MapboxCamera
+                        ref={cameraRef}
+                        defaultSettings={cameraDefaults}
+                      />
+                    )}
+                    {ShapeSource && LineLayer && (
+                      <ShapeSource
+                        id="routeSource"
+                        shape={{
+                          type: "Feature",
+                          properties: {},
+                          geometry: {
+                            type: "LineString",
+                            coordinates: [
+                              [STATION_COORDS.lng, STATION_COORDS.lat],
+                              [
+                                liveIncident.location.longitude,
+                                liveIncident.location.latitude,
+                              ],
+                            ],
+                          },
+                        }}
+                      >
+                        <LineLayer
+                          id="routeLine"
+                          style={{
+                            lineColor: "#2f80ed",
+                            lineWidth: 3,
+                            lineDasharray: [0.5, 1.5],
+                            lineCap: "round",
+                            lineJoin: "round",
+                          }}
+                        />
+                      </ShapeSource>
+                    )}
+                    {PointAnnotation && (
+                      <PointAnnotation
+                        id="station-location"
+                        coordinate={[STATION_COORDS.lng, STATION_COORDS.lat]}
+                        anchor={{ x: 0.5, y: 0.5 }}
+                      >
+                        <View style={styles.pinWrap}>
+                          <View style={styles.stationPin} />
+                        </View>
+                      </PointAnnotation>
+                    )}
+                    {PointAnnotation && (
+                      <PointAnnotation
+                        id="incident-location"
+                        coordinate={[
+                          liveIncident.location.longitude,
+                          liveIncident.location.latitude,
+                        ]}
+                        anchor={{ x: 0.5, y: 0.5 }}
+                      >
+                        <View style={styles.pinWrap}>
+                          <View style={styles.incidentPin} />
+                        </View>
+                      </PointAnnotation>
+                    )}
+                  </MapView>
+                  <View style={styles.addressOverlay} pointerEvents="none">
+                    <MapPin size={13} color={THEMES.floodBlue} />
+                    <Text style={styles.addressText} numberOfLines={1}>
+                      {liveIncident.location.address}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.placeholderSection}>
+                  <MapPin size={28} color={THEMES.mintGreen} />
+                  <Text style={styles.placeholderText}>
+                    {liveIncident.location.address}
+                  </Text>
+                </View>
+              )}
+
+              <ScrollView
+                style={styles.scroll}
+                showsVerticalScrollIndicator={false}
+              >
               <View style={styles.stepper}>
                 {STEPS.map((step, idx) => {
                   const isComplete = idx <= currentStepIdx;
@@ -196,102 +313,12 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
               </View>
 
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Incident Location</Text>
-                {MAPBOX_TOKEN && MapView ? (
-                  <View style={styles.mapContainer}>
-                    <MapView
-                      style={styles.map}
-                      styleURL="mapbox://styles/mapbox/streets-v12"
-                      scrollEnabled={false}
-                      rotateEnabled={false}
-                      onDidFinishLoadingMap={onMapLoaded}
-                    >
-                      {MapboxCamera && (
-                        <MapboxCamera
-                          ref={cameraRef}
-                          defaultSettings={{
-                            centerCoordinate: [
-                              (STATION_COORDS.lng + incident.location.longitude) / 2,
-                              (STATION_COORDS.lat + incident.location.latitude) / 2,
-                            ],
-                            zoomLevel: 13,
-                          }}
-                          animationMode="none"
-                        />
-                      )}
-                      {ShapeSource && LineLayer && (
-                        <ShapeSource
-                          id="routeSource"
-                          shape={{
-                            type: "Feature",
-                            properties: {},
-                            geometry: {
-                              type: "LineString",
-                              coordinates: [
-                                [STATION_COORDS.lng, STATION_COORDS.lat],
-                                [
-                                  incident.location.longitude,
-                                  incident.location.latitude,
-                                ],
-                              ],
-                            },
-                          }}
-                        >
-                          <LineLayer
-                            id="routeLine"
-                            style={{
-                              lineColor: "#2f80ed",
-                              lineWidth: 3,
-                              lineDasharray: [0.5, 1.5],
-                              lineCap: "round",
-                              lineJoin: "round",
-                            }}
-                          />
-                        </ShapeSource>
-                      )}
-                      {PointAnnotation && (
-                        <PointAnnotation
-                          id="station-location"
-                          coordinate={[STATION_COORDS.lng, STATION_COORDS.lat]}
-                          anchor={{ x: 0.5, y: 0.5 }}
-                        >
-                          <View style={styles.pinWrap}>
-                            <View style={styles.stationPin} />
-                          </View>
-                        </PointAnnotation>
-                      )}
-                      {PointAnnotation && (
-                        <PointAnnotation
-                          id="incident-location"
-                          coordinate={[
-                            incident.location.longitude,
-                            incident.location.latitude,
-                          ]}
-                          anchor={{ x: 0.5, y: 0.5 }}
-                        >
-                          <View style={styles.pinWrap}>
-                            <View style={styles.incidentPin} />
-                          </View>
-                        </PointAnnotation>
-                      )}
-                    </MapView>
-                  </View>
-                ) : (
-                  <View style={[styles.mapContainer, styles.mapPlaceholder]}>
-                    <MapPin size={32} color={THEMES.mintGreen} />
-                    <Text style={styles.placeholderText}>
-                      {incident.location.address}
-                    </Text>
-                  </View>
-                )}
-                <Text style={styles.address}>{incident.location.address}</Text>
-              </View>
-
-              <View style={styles.card}>
                 <Text style={styles.cardTitle}>Incident Details</Text>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Category</Text>
-                  <Text style={styles.detailValue}>{incident.category}</Text>
+                  <Text style={styles.detailValue}>
+                    {liveIncident.category}
+                  </Text>
                 </View>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Status</Text>
@@ -299,12 +326,12 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
                     style={[
                       styles.statusPill,
                       {
-                          backgroundColor:
-                          incident.status === "Resolved"
+                        backgroundColor:
+                          liveIncident.status === "Resolved"
                             ? THEMES.mintGreen
-                            : incident.status === "Dispatched"
+                            : liveIncident.status === "Dispatched"
                             ? "#FBBF24"
-                            : incident.status === "En Route"
+                            : liveIncident.status === "En Route"
                             ? THEMES.floodBlue
                             : THEMES.gray,
                       },
@@ -315,55 +342,62 @@ export default function DispatchTracker({ incidentId: propId, onBack }) {
                         styles.statusText,
                         {
                           color:
-                            incident.status === "Pending"
+                            liveIncident.status === "Pending"
                               ? THEMES.white
                               : THEMES.darkNavy,
                         },
                       ]}
                     >
-                      {incident.status.toUpperCase()}
+                      {liveIncident.status.toUpperCase()}
                     </Text>
                   </View>
                 </View>
-                {incident.dispatch && (
+                {liveIncident.dispatch && (
                   <>
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Station</Text>
                       <Text style={styles.detailValue}>
-                        {incident.dispatch.stationName}
+                        {liveIncident.dispatch.stationName}
                       </Text>
                     </View>
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Unit</Text>
                       <Text style={styles.detailValue}>
-                        {incident.dispatch.assignedUnit}
+                        {liveIncident.dispatch.assignedUnit}
+                      </Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Turnout</Text>
+                      <Text style={styles.detailValue}>
+                        {liveIncident.dispatch.estimatedTurnout}
                       </Text>
                     </View>
                   </>
                 )}
-                {incident.notes ? (
+                {liveIncident.notes ? (
                   <View style={styles.notesSection}>
                     <Text style={styles.detailLabel}>Notes</Text>
-                    <Text style={styles.notesText}>{incident.notes}</Text>
+                    <Text style={styles.notesText}>{liveIncident.notes}</Text>
                   </View>
                 ) : null}
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Reported</Text>
                   <Text style={styles.detailValue}>
-                    {new Date(incident.timestamp).toLocaleString("en-PH", {
+                    {new Date(liveIncident.timestamp).toLocaleString("en-PH", {
                       dateStyle: "medium",
                       timeStyle: "short",
                     })}
                   </Text>
                 </View>
               </View>
-            </>
-          )}
 
-          <View style={{ height: 40 }} />
+              <View style={{ height: 40 }} />
+            </ScrollView>
+            </View>
+          )}
         </>
       )}
-    </ScrollView>
+    </View>
   );
 }
 
@@ -371,6 +405,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: LIGHT.bg,
+  },
+  scroll: {
+    flex: 1,
   },
   header: {
     flexDirection: "row",
@@ -425,6 +462,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 0.5,
+  },
+  notFoundBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: "rgba(249,115,22,0.12)",
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(249,115,22,0.3)",
+  },
+  notFoundTitle: {
+    color: THEMES.medicalOrange,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  notFoundText: {
+    color: LIGHT.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
   },
   errorBanner: {
     marginHorizontal: 16,
@@ -512,22 +568,59 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
+  cardHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
   cardTitle: {
     fontSize: 14,
     color: LIGHT.textPrimary,
     fontWeight: "700",
-    marginBottom: 12,
   },
-  mapContainer: {
+  dispatchChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(47,128,237,0.1)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  dispatchChipText: {
+    fontSize: 10,
+    color: "#2f80ed",
+    fontWeight: "700",
+  },
+  mapSection: {
+    height: 240,
+    backgroundColor: LIGHT.inputBg,
+  },
+  heroMap: {
+    flex: 1,
+  },
+  addressOverlay: {
+    position: "absolute",
+    left: 12,
+    bottom: 12,
+    right: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.92)",
     borderRadius: 10,
-    overflow: "hidden",
-    height: 260,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  map: {
-    height: 260,
-    borderRadius: 10,
+  addressText: {
+    flex: 1,
+    fontSize: 12,
+    color: LIGHT.textPrimary,
+    fontWeight: "600",
   },
-  mapPlaceholder: {
+  placeholderSection: {
+    height: 200,
     backgroundColor: LIGHT.inputBg,
     justifyContent: "center",
     alignItems: "center",
@@ -563,11 +656,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#e4572e",
   },
-  address: {
-    fontSize: 13,
-    color: LIGHT.textPrimary,
-    fontWeight: "500",
-    marginTop: 10,
+  trackerBody: {
+    flex: 1,
   },
   detailRow: {
     flexDirection: "row",

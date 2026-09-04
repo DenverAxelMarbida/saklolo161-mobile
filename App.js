@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { StatusBar, StyleSheet, View, Text, TouchableOpacity, Image } from "react-native";
+import { StatusBar, StyleSheet, View, Text, TouchableOpacity } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { House, FileText, Radio } from "lucide-react-native";
+import { House, FileText, History } from "lucide-react-native";
 import HomeDashboard from "./src/screens/HomeDashboard";
 import IncidentForm from "./src/screens/IncidentForm";
 import DispatchTracker from "./src/screens/DispatchTracker";
+import ResolvedLog from "./src/screens/ResolvedLog";
 import { THEMES } from "./lib/themes";
 import { MAPBOX_TOKEN } from "./lib/config";
 
@@ -19,13 +20,13 @@ try {
 const TABS = [
   { key: "home", label: "Home", icon: House },
   { key: "report", label: "Report", icon: FileText },
-  { key: "track", label: "Track", icon: Radio },
+  { key: "history", label: "History", icon: History },
 ];
 
 export default function App() {
   const [screen, setScreen] = useState("home");
   const [selectedCategory, setSelectedCategory] = useState(null);
-  const [incidentId, setIncidentId] = useState(null);
+  const [incidentData, setIncidentData] = useState(null);
 
   useEffect(() => {
     if (MAPBOX_TOKEN && Mapbox && typeof Mapbox.setAccessToken === "function") {
@@ -38,15 +39,15 @@ export default function App() {
     setScreen("form");
   }
 
-  function navigateToTracker(id) {
-    setIncidentId(id);
+  function navigateToTracker(incident) {
+    setIncidentData(incident || null);
     setScreen("tracker");
   }
 
   function goHome() {
     setScreen("home");
     setSelectedCategory(null);
-    setIncidentId(null);
+    setIncidentData(null);
   }
 
   function handleTabPress(tab) {
@@ -54,16 +55,17 @@ export default function App() {
       goHome();
     } else if (tab === "report") {
       goHome();
-    } else if (tab === "track") {
+    } else if (tab === "history") {
       setSelectedCategory(null);
-      setIncidentId(null);
-      setScreen("tracker");
+      setIncidentData(null);
+      setScreen("history");
     }
   }
 
   function activeTab() {
-    if (screen === "tracker") return "track";
+    if (screen === "tracker") return "home";
     if (screen === "form") return "report";
+    if (screen === "history") return "history";
     return "home";
   }
 
@@ -81,8 +83,13 @@ export default function App() {
             />
           )}
           {screen === "tracker" && (
-            <DispatchTracker incidentId={incidentId} onBack={goHome} />
+            <DispatchTracker
+              incidentId={incidentData?.incidentId || null}
+              initialIncident={incidentData}
+              onBack={goHome}
+            />
           )}
+          {screen === "history" && <ResolvedLog onBack={goHome} />}
         </View>
 
         <View style={styles.tabBar}>
@@ -90,11 +97,7 @@ export default function App() {
             const Icon = tab.icon;
             const isActive = activeTab() === tab.key;
             const activeColor =
-              tab.key === "report"
-                ? THEMES.fireRed
-                : tab.key === "track"
-                ? THEMES.mintGreen
-                : THEMES.floodBlue;
+              tab.key === "report" ? THEMES.fireRed : THEMES.floodBlue;
             return (
               <TouchableOpacity
                 key={tab.key}
