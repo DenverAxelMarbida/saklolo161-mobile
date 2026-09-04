@@ -7,8 +7,9 @@ import {
   TouchableOpacity,
   BackHandler,
 } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { House, FileText, Radio, History } from "lucide-react-native";
+import { House, FileText, Radio, History, WifiOff } from "lucide-react-native";
 import HomeDashboard from "./src/screens/HomeDashboard";
 import IncidentForm from "./src/screens/IncidentForm";
 import DispatchTracker from "./src/screens/DispatchTracker";
@@ -35,11 +36,24 @@ export default function App() {
   const [screen, setScreen] = useState("home");
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [incidentData, setIncidentData] = useState(null);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     if (MAPBOX_TOKEN && Mapbox && typeof Mapbox.setAccessToken === "function") {
       Mapbox.setAccessToken(MAPBOX_TOKEN);
     }
+  }, []);
+
+  // Track connectivity so the app can warn the user that an internet
+  // connection is required to report/track incidents. Clear the banner
+  // automatically as soon as the device is back online.
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const offline =
+        state.isConnected === false || state.isInternetReachable === false;
+      setIsOffline(offline);
+    });
+    return () => unsubscribe();
   }, []);
 
   function navigateTo(category) {
@@ -101,6 +115,19 @@ export default function App() {
       <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <StatusBar barStyle="light-content" backgroundColor={THEMES.darkNavy} />
         <View style={styles.content}>
+          {isOffline && (
+            <View style={styles.offlineBanner}>
+              <WifiOff size={16} color="#FFFFFF" />
+              <View style={styles.offlineBody}>
+                <Text style={styles.offlineTitle}>You're offline</Text>
+                <Text style={styles.offlineText}>
+                  An active internet connection is required to report and track
+                  emergency incidents. Reconnect to continue submitting reports.
+                </Text>
+              </View>
+            </View>
+          )}
+
           {screen === "home" && <HomeDashboard onCategoryPress={navigateTo} />}
           {screen === "form" && (
             <IncidentForm
@@ -161,6 +188,28 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  offlineBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#B45309",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  offlineBody: {
+    flex: 1,
+  },
+  offlineTitle: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  offlineText: {
+    color: "#FDE68A",
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 2,
   },
   tabBar: {
     flexDirection: "row",
