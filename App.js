@@ -1,7 +1,14 @@
-import React, { useState, useEffect } from "react";
-import { StatusBar, StyleSheet, View, Text, TouchableOpacity } from "react-native";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  StatusBar,
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  BackHandler,
+} from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { House, FileText, History } from "lucide-react-native";
+import { House, FileText, Radio, History } from "lucide-react-native";
 import HomeDashboard from "./src/screens/HomeDashboard";
 import IncidentForm from "./src/screens/IncidentForm";
 import DispatchTracker from "./src/screens/DispatchTracker";
@@ -20,6 +27,7 @@ try {
 const TABS = [
   { key: "home", label: "Home", icon: House },
   { key: "report", label: "Report", icon: FileText },
+  { key: "track", label: "Track", icon: Radio },
   { key: "history", label: "History", icon: History },
 ];
 
@@ -44,17 +52,36 @@ export default function App() {
     setScreen("tracker");
   }
 
-  function goHome() {
+  const goHome = useCallback(() => {
     setScreen("home");
     setSelectedCategory(null);
     setIncidentData(null);
+  }, []);
+
+  function goTracker() {
+    setSelectedCategory(null);
+    setIncidentData(null);
+    setScreen("tracker");
   }
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (screen === "form" || screen === "tracker" || screen === "history") {
+        goHome();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [screen, goHome]);
 
   function handleTabPress(tab) {
     if (tab === "home") {
       goHome();
     } else if (tab === "report") {
       goHome();
+    } else if (tab === "track") {
+      goTracker();
     } else if (tab === "history") {
       setSelectedCategory(null);
       setIncidentData(null);
@@ -63,7 +90,7 @@ export default function App() {
   }
 
   function activeTab() {
-    if (screen === "tracker") return "home";
+    if (screen === "tracker") return "track";
     if (screen === "form") return "report";
     if (screen === "history") return "history";
     return "home";
@@ -97,7 +124,11 @@ export default function App() {
             const Icon = tab.icon;
             const isActive = activeTab() === tab.key;
             const activeColor =
-              tab.key === "report" ? THEMES.fireRed : THEMES.floodBlue;
+              tab.key === "report"
+                ? THEMES.fireRed
+                : tab.key === "track"
+                ? THEMES.mintGreen
+                : THEMES.floodBlue;
             return (
               <TouchableOpacity
                 key={tab.key}
@@ -105,7 +136,7 @@ export default function App() {
                 onPress={() => handleTabPress(tab.key)}
                 activeOpacity={0.7}
               >
-                <Icon size={22} color={isActive ? activeColor : THEMES.gray} />
+                <Icon size={20} color={isActive ? activeColor : THEMES.gray} />
                 <Text
                   style={[
                     styles.tabLabel,
@@ -136,14 +167,15 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#E5E7EB",
     backgroundColor: "#FFFFFF",
-    paddingBottom: 4,
+    paddingBottom: 6,
+    paddingTop: 4,
   },
   tabItem: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 8,
-    gap: 2,
+    paddingVertical: 6,
+    gap: 3,
   },
   tabLabel: {
     fontSize: 10,
