@@ -8,7 +8,7 @@ in this repo — the citizen-facing incident-reporting app.
 
 | Repo | Stack | Relationship to this repo |
 |---|---|---|
-| `saklolo161-backend` | Express.js REST API, Render | This repo's only backend. Calls exactly two endpoints — see "API Contract." |
+| `saklolo161-backend` | Express.js REST API, Render | This repo's only backend. Calls four public endpoints — see "API Contract." |
 | `saklolo161-web` | React 19 + Vite + Tailwind | Dispatcher-facing, authenticated. Shares design tokens and one polling pattern with this repo — nothing else. Request its files before assuming shared logic; don't assume this repo mirrors it. |
 
 Mapping: pure Mapbox via `@rnmapbox/maps` — **not** `react-native-maps`,
@@ -18,23 +18,26 @@ prefixed `EXPO_PUBLIC_` or it's silently stripped from the bundle.
 
 ## Roadmap Status
 
-- **Phase 2 (current):** Building the 3 core screens — Home Dashboard,
-  Incident Form, Dispatch Tracker. Full step-by-step task list:
+- **Phase 2 (done):** Home Dashboard, Incident Form, Dispatch Tracker —
+  merged and building clean. Task list used:
   `saklolo161-mobile-phase2-tasks.md`.
-- **Phase 3:** No changes expected on this repo's side. This app has
-  no login and never will in this architecture — the entire
-  Firebase/Auth migration happening in the other two repos doesn't
-  touch it. The only thing to watch: if the shape of
-  `GET /api/incidents/:id`'s response ever changes as part of that
-  migration, this repo needs to hear about it at the same time the web
-  team does.
+- **Phase 3 (in progress):** real routed path on the tracker map (from
+  the new public `GET /api/routes`), evidence capture/upload
+  (`POST /api/incidents/:id/evidence`), and a Jest/RNTL test suite +
+  CI hygiene. The Firebase/Auth cutover happening in the other two repos
+  does NOT touch this app — it has no login and never will. Watch item:
+  if `GET /api/incidents/:id`'s shape ever changes as part of the
+  backend's Phase 3 work, update the contract slice below.
+  Task list: `../Phase 3/saklolo161-mobile-phase3-tasks.md`
 
 ## API Contract — this repo's slice only
 
 | Endpoint | Auth | Use |
 |---|---|---|
 | `POST /api/incidents` | None | Submit a new report. Rate-limited server-side per `citizenPhone` (~3 per 10 min) — don't hammer it while testing. |
-| `GET /api/incidents/:id` | None | Poll a single incident's status. |
+| `GET /api/incidents/:id` | None | Poll a single incident's status (gains `evidence[]` and `station.coords` when dispatched in Phase 3). |
+| `GET /api/routes?fromLat&fromLng&toLat&toLng` | None | Phase 3. Real route geometry + distance/ETA. Rate-limited. |
+| `POST /api/incidents/:id/evidence` | None | Phase 3. Multipart field `file`; returns `{ fileId, url, mimeType, sizeKb, uploadedAt }`. Rate-limited. |
 
 **Hard rule: never call `GET /api/incidents` (the list endpoint).** It
 is dispatcher-only and requires a JWT this app will never have — it
@@ -130,37 +133,22 @@ data affect it more than a one-off request would:
 ## CI/CD
 
 `.github/workflows/ci.yml` currently only does `checkout` → `setup-node
-18` → `npm ci --legacy-peer-deps || npm install`. It doesn't lint,
-build, or test anything — a broken import or an obvious bug can merge
-to `main` with CI green. That's behind both other repos:
-`saklolo161-backend` runs `npm ci`; `saklolo161-web` runs `npm ci` →
-`npm run lint` → `npm run build`.
-
-Two changes are planned, in this order:
-
-1. **Add a lint step now.** Cheap, no flakiness risk, and closes the
-   gap with the other two repos immediately. Do this regardless of
-   what stage Phase 2 is at.
-2. **Add a build-sanity step (`expo-doctor` and/or `expo export`)
-   once the 3 core screens (Home Dashboard, Incident Form, Dispatch
-   Tracker) are functionally done and merged — not before.** Adding it
-   mid-build would go red while in-flight screens/env-var wiring from
-   `saklolo161-mobile-phase2-tasks.md` are still landing, and a
-   red check people learn to ignore is worse than no check yet. It
-   should validate a stable baseline from day one.
-
-**Not doing yet:** a full test suite (Jest/RNTL) — there's no test
-infra in this repo currently, and standing one up from scratch is a
-separate, bigger effort than closing the CI gap. Tracked as a Phase 3
-backlog item below, not bundled into the lint/build-sanity work above.
+18` → `npm ci --legacy-peer-deps || npm install` — no lint/build/test
+step, so a broken import can merge with CI green. Phase 3 closes this
+(see `../Phase 3/saklolo161-mobile-phase3-tasks.md`, task 3): add a lint
+step, then `expo-doctor`/`expo export` only once they go green on the
+stable baseline, plus a Jest/RNTL suite. A red check people learn to
+ignore is worse than no check — add each step when it's actually green,
+not before.
 
 ## Known Gaps / Backlog
 
 - No real GPS/telemetry-based "En Route" detection — manual dispatcher
-  action on web is the trigger for now (see Hard Rule 6).
-- No real routed path on the tracker map — pin only, for now (see Hard
-  Rule 5).
-- Evidence (photo/video) attachment upload wiring is UI-stub-only until
-  a storage endpoint exists on the backend.
-- No test suite (Jest/RNTL or otherwise) exists yet — flagged for
-  Phase 3, not blocking Phase 2 CI hygiene work (see "CI/CD" above).
+  action on web is the trigger for now (see Hard Rule 6). Held: needs a
+  responder client to generate telemetry; not planned this round.
+- No real routed path on the tracker map — Phase 3 task 1 draws
+  `GET /api/routes` geometry (straight-line fallback until then).
+- Evidence (photo/video) attachment wiring is UI-stub-only — Phase 3
+  task 2 wires capture + upload to `POST /api/incidents/:id/evidence`.
+- No test suite (Jest/RNTL or otherwise) — Phase 3 task 3 (see
+  "CI/CD" above).
