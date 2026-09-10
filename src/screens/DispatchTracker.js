@@ -53,6 +53,13 @@ export default function DispatchTracker({
   const { incident, error, notFound } = useIncidentPolling(incidentId);
   const liveIncident = incident || initialIncident;
 
+  // Evidence-upload progress — read from the same poll response the web
+  // dashboard uses. No new hook: this is pure display from polling data.
+  const isUploading = liveIncident?.evidenceUploading === true;
+  const evidenceCompleted = (liveIncident?.evidence ?? []).length;
+  const evidenceExpected = liveIncident?.evidenceExpectedCount ?? 0;
+  const evidenceFailed = liveIncident?.evidenceFailedCount ?? 0;
+
   // Responding station lives at the TOP level of the incident
   // (incident.station.coords), not under incident.dispatch.
   const stationCoords =
@@ -220,6 +227,22 @@ export default function DispatchTracker({
             <View style={styles.loadingContainer}>
               <ActivityIndicator color={THEMES.mintGreen} size="large" />
               <Text style={styles.loadingText}>Fetching status...</Text>
+            </View>
+          )}
+
+          {liveIncident && isUploading && (
+            <View style={styles.uploadBanner}>
+              <Text style={styles.uploadText}>
+                ⏳ Attaching evidence {evidenceCompleted}/{evidenceExpected}…
+              </Text>
+            </View>
+          )}
+
+          {liveIncident && !isUploading && evidenceFailed > 0 && (
+            <View style={styles.failedBanner}>
+              <Text style={styles.failedText}>
+                ⚠ {evidenceFailed} attachment{evidenceFailed === 1 ? '' : 's'} failed — your report still came through.
+              </Text>
             </View>
           )}
 
@@ -540,6 +563,33 @@ const styles = StyleSheet.create({
     borderColor: "rgba(239,68,68,0.3)",
   },
   errorText: {
+    color: THEMES.fireRed,
+    fontSize: 13,
+  },
+  uploadBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: "rgba(244,180,0,0.12)",
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(244,180,0,0.3)",
+  },
+  uploadText: {
+    color: "#F4B400",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  failedBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: "rgba(239,68,68,0.15)",
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.3)",
+  },
+  failedText: {
     color: THEMES.fireRed,
     fontSize: 13,
   },
