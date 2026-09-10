@@ -31,9 +31,10 @@ param(
   [switch]$Universal
 )
 
-# 1. Resolve JDK 17 (prefer Eclipse Adoptium; allow manual override)
+# 1. Resolve JDK 17 (auto-detect common locations; allow manual override)
 if (-not $env:JAVA_HOME) {
   $jdkCandidates = @(
+    "C:\Program Files\Java",
     "C:\Program Files\Eclipse Adoptium",
     "$env:LOCALAPPDATA\Programs\Eclipse Adoptium"
   )
@@ -42,7 +43,7 @@ if (-not $env:JAVA_HOME) {
          Sort-Object FullName -Descending |
          Select-Object -First 1 -ExpandProperty FullName
   if (-not $jdk) {
-    throw "JDK 17 not found under C:\Program Files\Eclipse Adoptium or %LOCALAPPDATA%\Programs\Eclipse Adoptium. Install Eclipse Adoptium JDK 17 or set JAVA_HOME manually."
+    throw "JDK 17 not found under C:\Program Files\Java, C:\Program Files\Eclipse Adoptium, or %LOCALAPPDATA%\Programs\Eclipse Adoptium. Install JDK 17 or set JAVA_HOME manually."
   }
   $env:JAVA_HOME = $jdk
 }
@@ -58,7 +59,23 @@ if (-not $env:ANDROID_HOME) {
   $env:ANDROID_SDK_ROOT = $sdk
 }
 
-# 3. Run the release build
+# 3. Clear stale release bundles so env changes always get baked back in.
+#    The RN/Gradle createBundle task does NOT track .env as an input, so
+#    changing EXPO_PUBLIC_* alone leaves the previous URL embedded in the
+#    "up-to-date" bundle. Deleting the outputs forces a rebundle.
+$staleBundlePaths = @(
+  "android\app\build\generated\assets\react\release\index.android.bundle",
+  "android\app\build\intermediates\assets\release\mergeReleaseAssets\index.android.bundle"
+)
+foreach ($stale in $staleBundlePaths) {
+  $stalePath = Join-Path $PSScriptRoot $stale
+  if (Test-Path -LiteralPath $stalePath) {
+    Remove-Item -LiteralPath $stalePath -Force
+    Write-Host "Cleared stale bundle: $stale" -ForegroundColor Yellow
+  }
+}
+
+# 4. Run the release build
 #    - Default: arm64-v8a, 1 worker (memory-safe)
 #    - Universal: all 4 ABIs, default workers (RAM-heavy)
 Set-Location (Join-Path $PSScriptRoot "android")

@@ -8,6 +8,7 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import {
   ArrowLeft,
@@ -16,12 +17,14 @@ import {
   Camera,
   Video,
   Send,
+  X,
 } from "lucide-react-native";
 import axios from "axios";
 import * as Location from "expo-location";
 import { API_BASE_URL, MAPBOX_TOKEN, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { getSavedPhone, savePhone, saveIncidentId } from "../../lib/storage";
+import { pickEvidence, uploadEvidence } from "../../lib/evidence";
 
 let MapView;
 let MapboxCamera;
@@ -48,6 +51,8 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   const [location, setLocation] = useState(INITIAL_LOCATION);
   const [loading, setLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState("locating"); // "locating" | "locked" | "failed"
+  const [evidence, setEvidence] = useState(null);
+  const [evidenceUploadFailed, setEvidenceUploadFailed] = useState(false);
   const gpsAttempts = useRef(0);
   const cameraRef = useRef(null);
 
@@ -120,6 +125,22 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
     })();
   }, []);
 
+  async function handlePickPhoto() {
+    const picked = await pickEvidence("photo");
+    if (picked) {
+      setEvidence(picked);
+      setEvidenceUploadFailed(false);
+    }
+  }
+
+  async function handlePickVideo() {
+    const picked = await pickEvidence("video");
+    if (picked) {
+      setEvidence(picked);
+      setEvidenceUploadFailed(false);
+    }
+  }
+
   async function handleSubmit() {
     if (!phone.trim()) {
       Alert.alert("Phone Required", "Enter your phone number to submit.");
@@ -149,6 +170,14 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         await saveIncidentId(incident.incidentId);
         if (phone.trim() !== (await getSavedPhone())) {
           await savePhone(phone.trim());
+        }
+        // Evidence upload is non-blocking: fire it in the background and
+        // navigate immediately. A failed upload never fails the report.
+        if (evidence) {
+          const file = evidence;
+          uploadEvidence(incident.incidentId, file)
+            .then(() => setEvidenceUploadFailed(false))
+            .catch(() => setEvidenceUploadFailed(true));
         }
         onSubmit(incident);
       }
@@ -312,18 +341,64 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Evidence</Text>
-        <View style={styles.evidenceRow}>
-          <TouchableOpacity style={styles.evidenceBtn} activeOpacity={0.7}>
-            <Camera size={24} color={THEMES.gray} />
-            <Text style={styles.evidenceLabel}>Add Photo</Text>
-            <Text style={styles.evidenceStub}>Coming soon</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.evidenceBtn} activeOpacity={0.7}>
-            <Video size={24} color={THEMES.gray} />
-            <Text style={styles.evidenceLabel}>Add Video</Text>
-            <Text style={styles.evidenceStub}>Coming soon</Text>
-          </TouchableOpacity>
-        </View>
+        {evidence ? (
+          <View style={styles.evidencePreviewWrap}>
+            {evidence.kind === "video" ? (
+              <View style={styles.evidenceVideoPlaceholder}>
+                <Video size={32} color={THEMES.floodBlue} />
+                <Text style={styles.evidenceVideoText}>Video selected</Text>
+                <Text style={styles.evidenceVideoName} numberOfLines={1}>
+                  {evidence.name}
+                </Text>
+              </View>
+            ) : (
+              <Image
+                source={{ uri: evidence.uri }}
+                style={styles.evidenceThumb}
+                resizeMode="cover"
+              />
+            )}
+            <TouchableOpacity
+              onPress={() => {
+                setEvidence(null);
+                setEvidenceUploadFailed(false);
+              }}
+              style={styles.evidenceRemoveBtn}
+              activeOpacity={0.8}
+            >
+              <X size={14} color={THEMES.white} />
+            </TouchableOpacity>
+            <Text style={styles.evidenceAttached}>
+              {evidence.kind === "video" ? "Video attached" : "Photo attached"}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.evidenceRow}>
+            <TouchableOpacity
+              style={styles.evidenceBtn}
+              activeOpacity={0.7}
+              onPress={handlePickPhoto}
+            >
+              <Camera size={24} color={THEMES.gray} />
+              <Text style={styles.evidenceLabel}>Add Photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.evidenceBtn}
+              activeOpacity={0.7}
+              onPress={handlePickVideo}
+            >
+              <Video size={24} color={THEMES.gray} />
+              <Text style={styles.evidenceLabel}>Add Video</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {evidenceUploadFailed && (
+          <View style={styles.evidenceNote}>
+            <Text style={styles.evidenceNoteText}>
+              Photo not attached — your report was still submitted.
+            </Text>
+          </View>
+        )}
       </View>
 
       <TouchableOpacity
@@ -587,9 +662,67 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
-  evidenceStub: {
+  evidencePreviewWrap: {
+    backgroundColor: LIGHT.inputBg,
+    borderRadius: 12,
+    overflow: "hidden",
+    padding: 12,
+    alignItems: "center",
+    gap: 8,
+  },
+  evidenceThumb: {
+    width: "100%",
+    height: 160,
+    borderRadius: 8,
+    backgroundColor: "#E5E7EB",
+  },
+  evidenceVideoPlaceholder: {
+    width: "100%",
+    height: 160,
+    borderRadius: 8,
+    backgroundColor: "#E5E7EB",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+  },
+  evidenceVideoText: {
+    color: LIGHT.textPrimary,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  evidenceVideoName: {
     color: LIGHT.textSecondary,
-    fontSize: 10,
+    fontSize: 11,
+    paddingHorizontal: 12,
+  },
+  evidenceAttached: {
+    color: LIGHT.textPrimary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  evidenceRemoveBtn: {
+    position: "absolute",
+    top: 20,
+    right: 20,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "rgba(17,26,58,0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  evidenceNote: {
+    marginTop: 10,
+    backgroundColor: "rgba(249,115,22,0.12)",
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "rgba(249,115,22,0.3)",
+  },
+  evidenceNoteText: {
+    color: THEMES.medicalOrange,
+    fontSize: 12,
+    fontWeight: "600",
   },
   submitBtn: {
     marginHorizontal: 16,
