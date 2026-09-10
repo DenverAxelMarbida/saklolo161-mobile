@@ -32,6 +32,7 @@ import {
   captureEvidence,
   appendEvidence,
   uploadEvidence,
+  updateEvidenceStatus,
   MAX_EVIDENCE,
 } from "../../lib/evidence";
 
@@ -175,6 +176,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         citizenPhone: phone.trim(),
         category: CATEGORY_DISPLAY[selectedCategory],
         notes: notes.trim(),
+        // Tell the backend how many attachments this report expects so the
+        // web dashboard can show "attachments still uploading".
+        evidenceExpectedCount: evidence.length,
         location: {
           latitude: location.latitude,
           longitude: location.longitude,
@@ -203,6 +207,13 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 failedDetails.push(`${file.name} — ${reason}`);
               }
             }
+            // Always signal completion (even when nothing failed) so the
+            // backend clears evidenceUploading and the dashboard stops
+            // showing "attachments still uploading".
+            await updateEvidenceStatus(incident.incidentId, {
+              evidenceUploading: false,
+              evidenceFailedCount: failedDetails.length,
+            });
             if (failedDetails.length > 0) {
               setEvidenceUploadFailed(failedDetails.length);
               Alert.alert(
