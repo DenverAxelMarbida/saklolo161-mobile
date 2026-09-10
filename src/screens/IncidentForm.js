@@ -16,6 +16,7 @@ import {
   Navigation,
   Camera,
   Video,
+  Images,
   Send,
   X,
 } from "lucide-react-native";
@@ -24,7 +25,13 @@ import * as Location from "expo-location";
 import { API_BASE_URL, MAPBOX_TOKEN, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { getSavedPhone, savePhone, saveIncidentId } from "../../lib/storage";
-import { pickEvidence, uploadEvidence } from "../../lib/evidence";
+import {
+  pickEvidence,
+  captureEvidence,
+  appendEvidence,
+  uploadEvidence,
+  MAX_EVIDENCE,
+} from "../../lib/evidence";
 
 let MapView;
 let MapboxCamera;
@@ -51,8 +58,8 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   const [location, setLocation] = useState(INITIAL_LOCATION);
   const [loading, setLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState("locating"); // "locating" | "locked" | "failed"
-  const [evidence, setEvidence] = useState(null);
-  const [evidenceUploadFailed, setEvidenceUploadFailed] = useState(false);
+  const [evidence, setEvidence] = useState([]);
+  const [evidenceUploadFailed, setEvidenceUploadFailed] = useState(0);
   const gpsAttempts = useRef(0);
   const cameraRef = useRef(null);
 
@@ -125,19 +132,19 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
     })();
   }, []);
 
-  async function handlePickPhoto() {
-    const picked = await pickEvidence("photo");
-    if (picked) {
-      setEvidence(picked);
-      setEvidenceUploadFailed(false);
+  async function addFromPicker(kind, multiple) {
+    const picked = await pickEvidence(kind, { multiple });
+    if (picked.length) {
+      setEvidence((current) => appendEvidence(current, picked));
+      setEvidenceUploadFailed(0);
     }
   }
 
-  async function handlePickVideo() {
-    const picked = await pickEvidence("video");
-    if (picked) {
-      setEvidence(picked);
-      setEvidenceUploadFailed(false);
+  async function addFromCamera(kind) {
+    const captured = await captureEvidence(kind);
+    if (captured.length) {
+      setEvidence((current) => appendEvidence(current, captured));
+      setEvidenceUploadFailed(0);
     }
   }
 
@@ -173,11 +180,26 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         }
         // Evidence upload is non-blocking: fire it in the background and
         // navigate immediately. A failed upload never fails the report.
-        if (evidence) {
-          const file = evidence;
-          uploadEvidence(incident.incidentId, file)
-            .then(() => setEvidenceUploadFailed(false))
-            .catch(() => setEvidenceUploadFailed(true));
+        if (evidence.length) {
+          setEvidenceUploadFailed(0);
+          const attachments = evidence;
+          (async () => {
+            let failed = 0;
+            for (const file of attachments) {
+              try {
+                await uploadEvidence(incident.incidentId, file);
+              } catch {
+                failed += 1;
+              }
+            }
+            if (failed > 0) {
+              setEvidenceUploadFailed(failed);
+              Alert.alert(
+                "Attachments Incomplete",
+                `${failed} of ${attachments.length} attachments failed to upload. Your report was still submitted.`
+              );
+            }
+          })();
         }
         onSubmit(incident);
       }
@@ -341,61 +363,101 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Evidence</Text>
-        {evidence ? (
-          <View style={styles.evidencePreviewWrap}>
-            {evidence.kind === "video" ? (
-              <View style={styles.evidenceVideoPlaceholder}>
-                <Video size={32} color={THEMES.floodBlue} />
-                <Text style={styles.evidenceVideoText}>Video selected</Text>
-                <Text style={styles.evidenceVideoName} numberOfLines={1}>
-                  {evidence.name}
-                </Text>
+        {evidence.length > 0 && (
+          <View style={styles.evidenceList}>
+            {evidence.map((item, index) => (
+              <View key={index} style={styles.evidencePreviewWrap}>
+                {item.kind === "video" ? (
+                  <View style={styles.evidenceVideoPlaceholder}>
+                    <Video size={28} color={THEMES.floodBlue} />
+                    <Text style={styles.evidenceVideoName} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: item.uri }}
+                    style={styles.evidenceThumb}
+                    resizeMode="cover"
+                  />
+                )}
+                <TouchableOpacity
+                  onPress={() =>
+                    setEvidence((current) =>
+                      current.filter((_, i) => i !== index)
+                    )
+                  }
+                  style={styles.evidenceRemoveBtn}
+                  activeOpacity={0.8}
+                >
+                  <X size={14} color={THEMES.white} />
+                </TouchableOpacity>
               </View>
-            ) : (
-              <Image
-                source={{ uri: evidence.uri }}
-                style={styles.evidenceThumb}
-                resizeMode="cover"
-              />
-            )}
-            <TouchableOpacity
-              onPress={() => {
-                setEvidence(null);
-                setEvidenceUploadFailed(false);
-              }}
-              style={styles.evidenceRemoveBtn}
-              activeOpacity={0.8}
-            >
-              <X size={14} color={THEMES.white} />
-            </TouchableOpacity>
-            <Text style={styles.evidenceAttached}>
-              {evidence.kind === "video" ? "Video attached" : "Photo attached"}
+            ))}
+            <Text style={styles.evidenceCount}>
+              {evidence.length} of {MAX_EVIDENCE} attachments
             </Text>
           </View>
-        ) : (
+        )}
+        <View style={styles.evidenceGrid}>
           <View style={styles.evidenceRow}>
             <TouchableOpacity
-              style={styles.evidenceBtn}
+              style={[
+                styles.evidenceBtn,
+                evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
+              ]}
+              disabled={evidence.length >= MAX_EVIDENCE}
               activeOpacity={0.7}
-              onPress={handlePickPhoto}
+              onPress={() => addFromPicker("photo", true)}
             >
-              <Camera size={24} color={THEMES.gray} />
-              <Text style={styles.evidenceLabel}>Add Photo</Text>
+              <Images size={24} color={THEMES.gray} />
+              <Text style={styles.evidenceLabel}>Library Photo</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.evidenceBtn}
+              style={[
+                styles.evidenceBtn,
+                evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
+              ]}
+              disabled={evidence.length >= MAX_EVIDENCE}
               activeOpacity={0.7}
-              onPress={handlePickVideo}
+              onPress={() => addFromPicker("video", false)}
             >
               <Video size={24} color={THEMES.gray} />
-              <Text style={styles.evidenceLabel}>Add Video</Text>
+              <Text style={styles.evidenceLabel}>Library Video</Text>
             </TouchableOpacity>
           </View>
-        )}
-        {evidenceUploadFailed && (
+          <View style={styles.evidenceRow}>
+            <TouchableOpacity
+              style={[
+                styles.evidenceBtn,
+                evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
+              ]}
+              disabled={evidence.length >= MAX_EVIDENCE}
+              activeOpacity={0.7}
+              onPress={() => addFromCamera("photo")}
+            >
+              <Camera size={24} color={THEMES.gray} />
+              <Text style={styles.evidenceLabel}>Capture Photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.evidenceBtn,
+                evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
+              ]}
+              disabled={evidence.length >= MAX_EVIDENCE}
+              activeOpacity={0.7}
+              onPress={() => addFromCamera("video")}
+            >
+              <Video size={24} color={THEMES.gray} />
+              <Text style={styles.evidenceLabel}>Capture Video</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        {evidenceUploadFailed > 0 && (
           <View style={styles.evidenceNote}>
             <Text style={styles.evidenceNoteText}>
-              Photo not attached — your report was still submitted.
+              Some attachments failed to upload — your report was still
+              submitted. The dispatcher may ask you to resend them.
             </Text>
           </View>
         )}
@@ -642,9 +704,16 @@ const styles = StyleSheet.create({
     height: 80,
     textAlignVertical: "top",
   },
+  evidenceGrid: {
+    gap: 8,
+  },
   evidenceRow: {
     flexDirection: "row",
     gap: 12,
+  },
+  evidenceList: {
+    gap: 10,
+    marginBottom: 12,
   },
   evidenceBtn: {
     flex: 1,
@@ -656,11 +725,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: LIGHT.border,
     borderStyle: "dashed",
+    flexDirection: "row",
+  },
+  evidenceBtnDisabled: {
+    opacity: 0.4,
   },
   evidenceLabel: {
     color: LIGHT.textPrimary,
     fontSize: 12,
     fontWeight: "600",
+  },
+  evidenceCount: {
+    fontSize: 12,
+    color: LIGHT.textSecondary,
+    fontWeight: "600",
+    textAlign: "center",
+    marginBottom: 2,
   },
   evidencePreviewWrap: {
     backgroundColor: LIGHT.inputBg,
@@ -685,20 +765,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  evidenceVideoText: {
-    color: LIGHT.textPrimary,
-    fontSize: 13,
-    fontWeight: "700",
-  },
   evidenceVideoName: {
     color: LIGHT.textSecondary,
     fontSize: 11,
     paddingHorizontal: 12,
-  },
-  evidenceAttached: {
-    color: LIGHT.textPrimary,
-    fontSize: 12,
-    fontWeight: "600",
   },
   evidenceRemoveBtn: {
     position: "absolute",

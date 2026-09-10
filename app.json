@@ -42,6 +42,14 @@
           "photosPermission": "Allow Saklolo 161 to attach photos and videos to your emergency report.",
           "cameraPermission": "Allow Saklolo 161 to access the camera."
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "extra": {
