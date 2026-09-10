@@ -9,6 +9,8 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Modal,
+  Pressable,
 } from "react-native";
 import {
   ArrowLeft,
@@ -60,6 +62,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   const [gpsStatus, setGpsStatus] = useState("locating"); // "locating" | "locked" | "failed"
   const [evidence, setEvidence] = useState([]);
   const [evidenceUploadFailed, setEvidenceUploadFailed] = useState(0);
+  const [chooser, setChooser] = useState(null); // null | "photo" | "video"
   const gpsAttempts = useRef(0);
   const cameraRef = useRef(null);
 
@@ -132,20 +135,16 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
     })();
   }, []);
 
-  async function addFromPicker(kind, multiple) {
-    const picked = await pickEvidence(kind, { multiple });
+  async function runChoice(kind, source) {
+    const picked =
+      source === "camera"
+        ? await captureEvidence(kind)
+        : await pickEvidence(kind, { multiple: kind === "photo" });
     if (picked.length) {
       setEvidence((current) => appendEvidence(current, picked));
       setEvidenceUploadFailed(0);
     }
-  }
-
-  async function addFromCamera(kind) {
-    const captured = await captureEvidence(kind);
-    if (captured.length) {
-      setEvidence((current) => appendEvidence(current, captured));
-      setEvidenceUploadFailed(0);
-    }
+    setChooser(null);
   }
 
   async function handleSubmit() {
@@ -206,7 +205,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
     } catch (err) {
       Alert.alert(
         "Submission Failed",
-        err.response?.data?.message || "Could not submit report. Try again."
+        err.response?.data?.message ||
+          err.message ||
+          "Could not submit report. Try again."
       );
     } finally {
       setLoading(false);
@@ -399,59 +400,31 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             </Text>
           </View>
         )}
-        <View style={styles.evidenceGrid}>
-          <View style={styles.evidenceRow}>
-            <TouchableOpacity
-              style={[
-                styles.evidenceBtn,
-                evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
-              ]}
-              disabled={evidence.length >= MAX_EVIDENCE}
-              activeOpacity={0.7}
-              onPress={() => addFromPicker("photo", true)}
-            >
-              <Images size={24} color={THEMES.gray} />
-              <Text style={styles.evidenceLabel}>Library Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.evidenceBtn,
-                evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
-              ]}
-              disabled={evidence.length >= MAX_EVIDENCE}
-              activeOpacity={0.7}
-              onPress={() => addFromPicker("video", false)}
-            >
-              <Video size={24} color={THEMES.gray} />
-              <Text style={styles.evidenceLabel}>Library Video</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.evidenceRow}>
-            <TouchableOpacity
-              style={[
-                styles.evidenceBtn,
-                evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
-              ]}
-              disabled={evidence.length >= MAX_EVIDENCE}
-              activeOpacity={0.7}
-              onPress={() => addFromCamera("photo")}
-            >
-              <Camera size={24} color={THEMES.gray} />
-              <Text style={styles.evidenceLabel}>Capture Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.evidenceBtn,
-                evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
-              ]}
-              disabled={evidence.length >= MAX_EVIDENCE}
-              activeOpacity={0.7}
-              onPress={() => addFromCamera("video")}
-            >
-              <Video size={24} color={THEMES.gray} />
-              <Text style={styles.evidenceLabel}>Capture Video</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.evidenceRow}>
+          <TouchableOpacity
+            style={[
+              styles.evidenceBtn,
+              evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
+            ]}
+            disabled={evidence.length >= MAX_EVIDENCE}
+            activeOpacity={0.7}
+            onPress={() => setChooser("photo")}
+          >
+            <Camera size={24} color={THEMES.gray} />
+            <Text style={styles.evidenceLabel}>Add Photo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.evidenceBtn,
+              evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
+            ]}
+            disabled={evidence.length >= MAX_EVIDENCE}
+            activeOpacity={0.7}
+            onPress={() => setChooser("video")}
+          >
+            <Video size={24} color={THEMES.gray} />
+            <Text style={styles.evidenceLabel}>Add Video</Text>
+          </TouchableOpacity>
         </View>
         {evidenceUploadFailed > 0 && (
           <View style={styles.evidenceNote}>
@@ -462,6 +435,50 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
           </View>
         )}
       </View>
+
+      <Modal
+        visible={chooser !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setChooser(null)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setChooser(null)}>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>
+              Add {chooser === "video" ? "Video" : "Photo"}
+            </Text>
+            <TouchableOpacity
+              style={styles.sheetOption}
+              activeOpacity={0.7}
+              onPress={() => chooser && runChoice(chooser, "camera")}
+            >
+              {chooser === "video" ? (
+                <Video size={22} color={THEMES.darkNavy} />
+              ) : (
+                <Camera size={22} color={THEMES.darkNavy} />
+              )}
+              <Text style={styles.sheetOptionText}>
+                {chooser === "video" ? "Record a video" : "Take a photo"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.sheetOption}
+              activeOpacity={0.7}
+              onPress={() => chooser && runChoice(chooser, "library")}
+            >
+              <Images size={22} color={THEMES.darkNavy} />
+              <Text style={styles.sheetOptionText}>Choose from library</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sheetOption, styles.sheetCancel]}
+              activeOpacity={0.7}
+              onPress={() => setChooser(null)}
+            >
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
 
       <TouchableOpacity
         style={[
@@ -704,9 +721,6 @@ const styles = StyleSheet.create({
     height: 80,
     textAlignVertical: "top",
   },
-  evidenceGrid: {
-    gap: 8,
-  },
   evidenceRow: {
     flexDirection: "row",
     gap: 12,
@@ -741,6 +755,50 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
     marginBottom: 2,
+  },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(17,26,58,0.5)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 28,
+    gap: 10,
+  },
+  sheetTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: LIGHT.textPrimary,
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  sheetOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: LIGHT.inputBg,
+    borderRadius: 12,
+    padding: 16,
+  },
+  sheetOptionText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: LIGHT.textPrimary,
+  },
+  sheetCancel: {
+    justifyContent: "center",
+    backgroundColor: "transparent",
+    paddingVertical: 12,
+  },
+  sheetCancelText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: THEMES.fireRed,
+    textAlign: "center",
   },
   evidencePreviewWrap: {
     backgroundColor: LIGHT.inputBg,
