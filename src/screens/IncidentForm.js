@@ -34,6 +34,7 @@ import {
   uploadEvidence,
   updateEvidenceStatus,
   retryFailedEvidence,
+  evidenceTooLarge,
   MAX_EVIDENCE,
 } from "../../lib/evidence";
 
@@ -153,7 +154,19 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         ? await captureEvidence(kind)
         : await pickEvidence(kind, { multiple: kind === "photo" });
     if (picked.length) {
-      setEvidence((current) => appendEvidence(current, picked));
+      const accepted = picked.filter((item) => !evidenceTooLarge(item));
+      const rejected = picked.length - accepted.length;
+      if (rejected > 0) {
+        Alert.alert(
+          "Attachment Too Large",
+          `${rejected} attachment${rejected === 1 ? "" : "s"} ${
+            rejected === 1 ? "is" : "are"
+          } over the 200MB upload limit and ${
+            rejected === 1 ? "was" : "were"
+          } skipped. Shorten the clip or lower the resolution.`
+        );
+      }
+      setEvidence((current) => appendEvidence(current, accepted));
       setEvidenceUploadFailed(0);
     }
     setChooser(null);
