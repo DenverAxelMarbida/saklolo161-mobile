@@ -34,7 +34,6 @@ import {
   uploadEvidence,
   updateEvidenceStatus,
   retryFailedEvidence,
-  evidenceTooLarge,
   MAX_EVIDENCE,
 } from "../../lib/evidence";
 
@@ -110,7 +109,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             maximumAge: 10000,
           });
         } catch {
-          // attempt failed — retry after a short pause for the next loop
+          // attempt failed â€” retry after a short pause for the next loop
           await new Promise((resolve) => setTimeout(resolve, 1200));
         }
       }
@@ -220,7 +219,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 const reason =
                   err?.response?.data?.message || err?.message || "upload failed";
                 failedFiles.push(file);
-                failedDetails.push(`${file.name} — ${reason}`);
+                failedDetails.push(`${file.name} â€” ${reason}`);
               }
             }
             if (failedFiles.length > 0) {
@@ -369,7 +368,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 ? "GPS Locked"
                 : gpsStatus === "failed"
                 ? "GPS Failed"
-                : "Acquiring GPS…"}
+                : "Acquiring GPSâ€¦"}
             </Text>
           </View>
           {gpsStatus !== "locked" && (
@@ -381,7 +380,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             </TouchableOpacity>
           )}
           <Text style={[styles.address, gpsStatus !== "locked" && { color: LIGHT.textSecondary }]}>
-            {gpsStatus === "locked" ? location.address : "Waiting for your location…"}
+            {gpsStatus === "locked" ? location.address : "Waiting for your locationâ€¦"}
           </Text>
           {gpsStatus === "locked" && (
             <Text style={styles.coords}>
@@ -508,7 +507,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         {evidenceUploadFailed > 0 && (
           <View style={styles.evidenceNote}>
             <Text style={styles.evidenceNoteText}>
-              Some attachments failed to upload — your report was still
+              Some attachments failed to upload â€” your report was still
               submitted. The dispatcher may ask you to resend them.
             </Text>
           </View>
@@ -577,7 +576,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
               {gpsStatus !== "locked"
                 ? gpsStatus === "failed"
                   ? "WAITING FOR GPS"
-                  : "ACQUIRING LOCATION…"
+                  : "ACQUIRING LOCATIONâ€¦"
                 : "SUBMIT REPORT"}
             </Text>
           </>
@@ -957,3 +956,5 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
+
+  evidenceTooLarge,
