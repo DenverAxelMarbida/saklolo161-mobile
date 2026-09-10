@@ -1,4 +1,11 @@
-import { appendEvidence, MAX_EVIDENCE } from "../lib/evidence";
+import {
+  appendEvidence,
+  MAX_EVIDENCE,
+  updateEvidenceStatus,
+} from "../lib/evidence";
+
+jest.mock("axios", () => ({ post: jest.fn() }));
+import axios from "axios";
 
 describe("appendEvidence", () => {
   const photo = { kind: "photo", name: "a.jpg", uri: "file://a.jpg" };
@@ -36,5 +43,28 @@ describe("appendEvidence", () => {
 
   it("appends a video one at a time alongside existing photos", () => {
     expect(appendEvidence([photo], [video])).toEqual([photo, video]);
+  });
+});
+
+describe("updateEvidenceStatus", () => {
+  beforeEach(() => {
+    axios.post.mockReset();
+  });
+
+  it("POSTs completion progress to the evidence-status endpoint", async () => {
+    axios.post.mockResolvedValueOnce({ data: { success: true } });
+    await updateEvidenceStatus("INC-123", { evidenceUploading: false, evidenceFailedCount: 0 });
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.stringContaining("/api/incidents/INC-123/evidence-status"),
+      { evidenceUploading: false, evidenceFailedCount: 0 },
+      expect.objectContaining({ timeout: 15000 })
+    );
+  });
+
+  it("never rejects when the backend is unreachable", async () => {
+    axios.post.mockRejectedValueOnce(new Error("network down"));
+    await expect(
+      updateEvidenceStatus("INC-123", { evidenceUploading: false, evidenceFailedCount: 1 })
+    ).resolves.toBeUndefined();
   });
 });
