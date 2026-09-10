@@ -8,6 +8,9 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Image,
+  Modal,
+  Pressable,
 } from "react-native";
 import {
   ArrowLeft,
@@ -15,13 +18,22 @@ import {
   Navigation,
   Camera,
   Video,
+  Images,
   Send,
+  X,
 } from "lucide-react-native";
 import axios from "axios";
 import * as Location from "expo-location";
 import { API_BASE_URL, MAPBOX_TOKEN, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { getSavedPhone, savePhone, saveIncidentId } from "../../lib/storage";
+import {
+  pickEvidence,
+  captureEvidence,
+  appendEvidence,
+  uploadEvidence,
+  MAX_EVIDENCE,
+} from "../../lib/evidence";
 
 let MapView;
 let MapboxCamera;
@@ -48,6 +60,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   const [location, setLocation] = useState(INITIAL_LOCATION);
   const [loading, setLoading] = useState(false);
   const [gpsStatus, setGpsStatus] = useState("locating"); // "locating" | "locked" | "failed"
+  const [evidence, setEvidence] = useState([]);
+  const [evidenceUploadFailed, setEvidenceUploadFailed] = useState(0);
+  const [chooser, setChooser] = useState(null); // null | "photo" | "video"
   const gpsAttempts = useRef(0);
   const cameraRef = useRef(null);
 
@@ -60,6 +75,16 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
       });
     }
   }
+
+  useEffect(() => {
+    if (cameraRef.current && gpsStatus === "locked") {
+      cameraRef.current.setCamera({
+        centerCoordinate: [location.longitude, location.latitude],
+        zoomLevel: 14,
+        animationMode: "flyTo",
+      });
+    }
+  }, [location.latitude, location.longitude, gpsStatus]);
 
   async function acquireGps() {
     setGpsStatus("locating");
@@ -120,6 +145,18 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
     })();
   }, []);
 
+  async function runChoice(kind, source) {
+    const picked =
+      source === "camera"
+        ? await captureEvidence(kind)
+        : await pickEvidence(kind, { multiple: kind === "photo" });
+    if (picked.length) {
+      setEvidence((current) => appendEvidence(current, picked));
+      setEvidenceUploadFailed(0);
+    }
+    setChooser(null);
+  }
+
   async function handleSubmit() {
     if (!phone.trim()) {
       Alert.alert("Phone Required", "Enter your phone number to submit.");
@@ -150,12 +187,41 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         if (phone.trim() !== (await getSavedPhone())) {
           await savePhone(phone.trim());
         }
+        // Evidence upload is non-blocking: fire it in the background and
+        // navigate immediately. A failed upload never fails the report.
+        if (evidence.length) {
+          setEvidenceUploadFailed(0);
+          const attachments = evidence;
+          (async () => {
+            const failedDetails = [];
+            for (const file of attachments) {
+              try {
+                await uploadEvidence(incident.incidentId, file);
+              } catch (err) {
+                const reason =
+                  err?.response?.data?.message || err?.message || "upload failed";
+                failedDetails.push(`${file.name} — ${reason}`);
+              }
+            }
+            if (failedDetails.length > 0) {
+              setEvidenceUploadFailed(failedDetails.length);
+              Alert.alert(
+                "Attachments Incomplete",
+                `${failedDetails.length} of ${attachments.length} attachments failed to upload. Your report was still submitted.\n\n${failedDetails.join(
+                  "\n"
+                )}`
+              );
+            }
+          })();
+        }
         onSubmit(incident);
       }
     } catch (err) {
       Alert.alert(
         "Submission Failed",
-        err.response?.data?.message || "Could not submit report. Try again."
+        err.response?.data?.message ||
+          err.message ||
+          "Could not submit report. Try again."
       );
     } finally {
       setLoading(false);
@@ -312,19 +378,121 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Evidence</Text>
+        {evidence.length > 0 && (
+          <View style={styles.evidenceList}>
+            {evidence.map((item, index) => (
+              <View key={index} style={styles.evidencePreviewWrap}>
+                {item.kind === "video" ? (
+                  <View style={styles.evidenceVideoPlaceholder}>
+                    <Video size={28} color={THEMES.floodBlue} />
+                    <Text style={styles.evidenceVideoName} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: item.uri }}
+                    style={styles.evidenceThumb}
+                    resizeMode="cover"
+                  />
+                )}
+                <TouchableOpacity
+                  onPress={() =>
+                    setEvidence((current) =>
+                      current.filter((_, i) => i !== index)
+                    )
+                  }
+                  style={styles.evidenceRemoveBtn}
+                  activeOpacity={0.8}
+                >
+                  <X size={14} color={THEMES.white} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            <Text style={styles.evidenceCount}>
+              {evidence.length} of {MAX_EVIDENCE} attachments
+            </Text>
+          </View>
+        )}
         <View style={styles.evidenceRow}>
-          <TouchableOpacity style={styles.evidenceBtn} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={[
+              styles.evidenceBtn,
+              evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
+            ]}
+            disabled={evidence.length >= MAX_EVIDENCE}
+            activeOpacity={0.7}
+            onPress={() => setChooser("photo")}
+          >
             <Camera size={24} color={THEMES.gray} />
             <Text style={styles.evidenceLabel}>Add Photo</Text>
-            <Text style={styles.evidenceStub}>Coming soon</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.evidenceBtn} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={[
+              styles.evidenceBtn,
+              evidence.length >= MAX_EVIDENCE && styles.evidenceBtnDisabled,
+            ]}
+            disabled={evidence.length >= MAX_EVIDENCE}
+            activeOpacity={0.7}
+            onPress={() => setChooser("video")}
+          >
             <Video size={24} color={THEMES.gray} />
             <Text style={styles.evidenceLabel}>Add Video</Text>
-            <Text style={styles.evidenceStub}>Coming soon</Text>
           </TouchableOpacity>
         </View>
+        {evidenceUploadFailed > 0 && (
+          <View style={styles.evidenceNote}>
+            <Text style={styles.evidenceNoteText}>
+              Some attachments failed to upload — your report was still
+              submitted. The dispatcher may ask you to resend them.
+            </Text>
+          </View>
+        )}
       </View>
+
+      <Modal
+        visible={chooser !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setChooser(null)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setChooser(null)}>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>
+              Add {chooser === "video" ? "Video" : "Photo"}
+            </Text>
+            <TouchableOpacity
+              style={styles.sheetOption}
+              activeOpacity={0.7}
+              onPress={() => chooser && runChoice(chooser, "camera")}
+            >
+              {chooser === "video" ? (
+                <Video size={22} color={THEMES.darkNavy} />
+              ) : (
+                <Camera size={22} color={THEMES.darkNavy} />
+              )}
+              <Text style={styles.sheetOptionText}>
+                {chooser === "video" ? "Record a video" : "Take a photo"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.sheetOption}
+              activeOpacity={0.7}
+              onPress={() => chooser && runChoice(chooser, "library")}
+            >
+              <Images size={22} color={THEMES.darkNavy} />
+              <Text style={styles.sheetOptionText}>Choose from library</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sheetOption, styles.sheetCancel]}
+              activeOpacity={0.7}
+              onPress={() => setChooser(null)}
+            >
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
 
       <TouchableOpacity
         style={[
@@ -571,6 +739,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
   },
+  evidenceList: {
+    gap: 10,
+    marginBottom: 12,
+  },
   evidenceBtn: {
     flex: 1,
     backgroundColor: LIGHT.inputBg,
@@ -581,15 +753,118 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: LIGHT.border,
     borderStyle: "dashed",
+    flexDirection: "row",
+  },
+  evidenceBtnDisabled: {
+    opacity: 0.4,
   },
   evidenceLabel: {
     color: LIGHT.textPrimary,
     fontSize: 12,
     fontWeight: "600",
   },
-  evidenceStub: {
+  evidenceCount: {
+    fontSize: 12,
     color: LIGHT.textSecondary,
-    fontSize: 10,
+    fontWeight: "600",
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(17,26,58,0.5)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 28,
+    gap: 10,
+  },
+  sheetTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: LIGHT.textPrimary,
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  sheetOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: LIGHT.inputBg,
+    borderRadius: 12,
+    padding: 16,
+  },
+  sheetOptionText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: LIGHT.textPrimary,
+  },
+  sheetCancel: {
+    justifyContent: "center",
+    backgroundColor: "transparent",
+    paddingVertical: 12,
+  },
+  sheetCancelText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: THEMES.fireRed,
+    textAlign: "center",
+  },
+  evidencePreviewWrap: {
+    backgroundColor: LIGHT.inputBg,
+    borderRadius: 12,
+    overflow: "hidden",
+    padding: 12,
+    alignItems: "center",
+    gap: 8,
+  },
+  evidenceThumb: {
+    width: "100%",
+    height: 160,
+    borderRadius: 8,
+    backgroundColor: "#E5E7EB",
+  },
+  evidenceVideoPlaceholder: {
+    width: "100%",
+    height: 160,
+    borderRadius: 8,
+    backgroundColor: "#E5E7EB",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+  },
+  evidenceVideoName: {
+    color: LIGHT.textSecondary,
+    fontSize: 11,
+    paddingHorizontal: 12,
+  },
+  evidenceRemoveBtn: {
+    position: "absolute",
+    top: 20,
+    right: 20,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "rgba(17,26,58,0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  evidenceNote: {
+    marginTop: 10,
+    backgroundColor: "rgba(249,115,22,0.12)",
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "rgba(249,115,22,0.3)",
+  },
+  evidenceNoteText: {
+    color: THEMES.medicalOrange,
+    fontSize: 12,
+    fontWeight: "600",
   },
   submitBtn: {
     marginHorizontal: 16,

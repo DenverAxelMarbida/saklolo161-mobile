@@ -72,6 +72,9 @@ will 401. This repo tracks a citizen's own report(s) by ID via
    spirit as the backend's "never hardcode station duty numbers" rule
    — these are public numbers, not internal dispatch lines, but a
    wrong/changed number should be a one-line fix, not a rebuild.
+   Numbers come from `../Phase 3/station-data-checklistCOMPLETE.md`
+   (Part 2) — keep them in sync with the backend's
+   `config/env.js` fallbacks.
 5. **Don't build custom station-to-incident routing math.** A real
    Directions-API-backed route is planned to replace the web
    dashboard's current straight-line placeholder too — this repo

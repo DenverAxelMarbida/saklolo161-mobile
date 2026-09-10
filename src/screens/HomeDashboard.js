@@ -44,6 +44,14 @@ const CATEGORY_ICONS = {
   CRIME: Siren,
 };
 
+const DISTRESS_COLORS = {
+  SAKLOLO_161: THEMES.darkNavy,
+  MEDICAL_ARMMC_ER: CATEGORY_COLORS.MEDICAL,
+  FIRE_BFP_MAIN: CATEGORY_COLORS.FIRE,
+  FLOOD_RIVER: CATEGORY_COLORS.FLOOD,
+  CRIME_PNP_HQ: CATEGORY_COLORS.CRIME,
+};
+
 const RISK_COLORS = {
   "LOW RISK": THEMES.mintGreen,
   "MEDIUM RISK": "#FBBF24",
@@ -164,15 +172,16 @@ export default function HomeDashboard({ onCategoryPress }) {
 
       <Text style={styles.sectionTitle}>QUICK DISTRESS CALL</Text>
       <View style={styles.distressRow}>
-        {Object.entries(DISTRESS_NUMBERS).map(([key, number]) => (
+        {DISTRESS_NUMBERS.map(({ key, label, display, dial }) => (
           <TouchableOpacity
             key={key}
             style={styles.distressBtn}
-            onPress={() => handleDistressCall(number)}
+            onPress={() => handleDistressCall(dial)}
             activeOpacity={0.7}
           >
-            <Phone size={18} color={THEMES.fireRed} />
-            <Text style={styles.distressLabel}>{key.replace("_", " ")}</Text>
+            <Phone size={18} color={DISTRESS_COLORS[key] || THEMES.fireRed} />
+            <Text style={styles.distressLabel}>{label}</Text>
+            <Text style={styles.distressNumber}>{display}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -339,11 +348,13 @@ const styles = StyleSheet.create({
   },
   distressRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     paddingHorizontal: 16,
     gap: 10,
   },
   distressBtn: {
-    flex: 1,
+    flexBasis: "30%",
+    flexGrow: 1,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     padding: 14,
@@ -363,6 +374,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.5,
+  },
+  distressNumber: {
+    color: LIGHT.textSecondary,
+    fontSize: 10,
+    fontWeight: "600",
   },
   locationPill: {
     flexDirection: "row",

@@ -13,9 +13,11 @@ import {
   CheckCircle2,
   MapPin,
 } from "lucide-react-native";
-import { MAPBOX_TOKEN } from "../../lib/config";
+import axios from "axios";
+import { MAPBOX_TOKEN, API_BASE_URL } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { getRecentIncidentIds } from "../../lib/storage";
+import { STEPS, stepIndexFor } from "../../lib/stepper";
 import useIncidentPolling from "../hooks/useIncidentPolling";
 
 let MapView;
@@ -35,20 +37,6 @@ try {
   // Mapbox not available
 }
 
-const STEPS = ["Pending", "Dispatched", "En Route", "Resolved"];
-
-const STEP_INDEX = {
-  Pending: 0,
-  Dispatched: 1,
-  "En Route": 2,
-  Resolved: 3,
-};
-
-// Static demo station coordinate (Marikina City) — mirrors the web
-// dashboard's STATION_COORDS. A real build would source this from the
-// station record returned by the backend.
-const STATION_COORDS = { lat: 14.6455, lng: 121.101 };
-
 export default function DispatchTracker({
   incidentId: propId,
   initialIncident,
@@ -65,22 +53,87 @@ export default function DispatchTracker({
   const { incident, error, notFound } = useIncidentPolling(incidentId);
   const liveIncident = incident || initialIncident;
 
+  // Responding station lives at the TOP level of the incident
+  // (incident.station.coords), not under incident.dispatch.
+  const stationCoords =
+    liveIncident?.station?.coords &&
+    typeof liveIncident.station.coords.lat === "number" &&
+    typeof liveIncident.station.coords.lng === "number"
+      ? liveIncident.station.coords
+      : null;
+  const stationLng = stationCoords?.lng;
+  const stationLat = stationCoords?.lat;
+
+  const incidentLng = liveIncident?.location?.longitude;
+  const incidentLat = liveIncident?.location?.latitude;
+
+  // Real driving geometry served by GET /api/routes (or straight-line
+  // fallback if that fetch fails). Drawn with the existing ShapeSource/
+  // LineLayer — never computed client-side. Stored alongside the incident
+  // ID it was fetched for so a stale polyline never shows for a different
+  // incident while a newer request is in flight.
+  const [routeState, setRouteState] = useState(null);
+  const routeCoords =
+    routeState && routeState.incidentId === incidentId
+      ? routeState.coords
+      : null;
+
+  useEffect(() => {
+    if (!stationCoords || incidentLat == null || incidentLng == null) {
+      return;
+    }
+    let cancelled = false;
+    const fallback = [
+      [stationCoords.lng, stationCoords.lat],
+      [incidentLng, incidentLat],
+    ];
+    (async () => {
+      try {
+        const res = await axios.get(`${API_BASE_URL}/api/routes`, {
+          params: {
+            fromLat: stationCoords.lat,
+            fromLng: stationCoords.lng,
+            toLat: incidentLat,
+            toLng: incidentLng,
+          },
+        });
+        if (cancelled) return;
+        const coords = res.data?.data?.geometry?.coordinates;
+        setRouteState({
+          incidentId,
+          coords:
+            Array.isArray(coords) && coords.length >= 2 ? coords : fallback,
+        });
+      } catch {
+        if (!cancelled) setRouteState({ incidentId, coords: fallback });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stationLat, stationLng, incidentLat, incidentLng, incidentId]);
+
   // Stable camera target so re-renders (10s polling) don't re-center the
   // map over the user's manual pan/swipe. Only recompute when the actual
   // coordinates change (primitive deps keep identity stable per incident).
-  const incidentLng = liveIncident?.location?.longitude;
-  const incidentLat = liveIncident?.location?.latitude;
   const cameraDefaults = React.useMemo(() => {
     if (!liveIncident) return null;
+    if (stationCoords) {
+      return {
+        centerCoordinate: [
+          (stationLng + (incidentLng ?? 0)) / 2,
+          (stationLat + (incidentLat ?? 0)) / 2,
+        ],
+        zoomLevel: 13,
+      };
+    }
     return {
-      centerCoordinate: [
-        (STATION_COORDS.lng + (incidentLng ?? 0)) / 2,
-        (STATION_COORDS.lat + (incidentLat ?? 0)) / 2,
-      ],
-      zoomLevel: 13,
+      centerCoordinate: [incidentLng ?? 0, incidentLat ?? 0],
+      zoomLevel: 15,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incidentLng, incidentLat]);
+  }, [stationLat, stationLng, incidentLng, incidentLat]);
 
   useEffect(() => {
     if (!propId && !initialIncident) {
@@ -100,9 +153,7 @@ export default function DispatchTracker({
     setShowPicker(false);
   }
 
-  const currentStepIdx = liveIncident
-    ? STEP_INDEX[liveIncident.status] ?? 0
-    : -1;
+  const currentStepIdx = liveIncident ? stepIndexFor(liveIncident.status) : -1;
 
   return (
     <View style={styles.container}>
@@ -191,7 +242,10 @@ export default function DispatchTracker({
                         defaultSettings={cameraDefaults}
                       />
                     )}
-                    {ShapeSource && LineLayer && (
+                    {ShapeSource &&
+                      LineLayer &&
+                      routeCoords &&
+                      stationCoords && (
                       <ShapeSource
                         id="routeSource"
                         shape={{
@@ -199,13 +253,7 @@ export default function DispatchTracker({
                           properties: {},
                           geometry: {
                             type: "LineString",
-                            coordinates: [
-                              [STATION_COORDS.lng, STATION_COORDS.lat],
-                              [
-                                liveIncident.location.longitude,
-                                liveIncident.location.latitude,
-                              ],
-                            ],
+                            coordinates: routeCoords,
                           },
                         }}
                       >
@@ -221,10 +269,10 @@ export default function DispatchTracker({
                         />
                       </ShapeSource>
                     )}
-                    {PointAnnotation && (
+                    {PointAnnotation && stationCoords && (
                       <PointAnnotation
                         id="station-location"
-                        coordinate={[STATION_COORDS.lng, STATION_COORDS.lat]}
+                        coordinate={[stationCoords.lng, stationCoords.lat]}
                         anchor={{ x: 0.5, y: 0.5 }}
                       >
                         <View style={styles.pinWrap}>
