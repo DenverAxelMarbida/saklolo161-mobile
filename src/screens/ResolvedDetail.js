@@ -5,7 +5,9 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Image,
 } from "react-native";
+import { useVideoPlayer, VideoView } from "expo-video";
 import {
   ArrowLeft,
   MapPin,
@@ -21,6 +23,7 @@ import {
   CATEGORY_DISPLAY,
   CATEGORY_COLORS,
   MAPBOX_TOKEN,
+  resolveApiUrl,
 } from "../../lib/config";
 
 let MapView;
@@ -42,6 +45,21 @@ function formatTimestamp(isoString) {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+function EvidenceVideo({ url }) {
+  const player = useVideoPlayer(url, (p) => {
+    p.loop = false;
+    p.playbackRate = 1;
+  });
+  return (
+    <VideoView
+      player={player}
+      style={styles.evidenceVideo}
+      allowsFullscreen
+      nativeControls
+    />
+  );
 }
 
 export default function ResolvedDetail({ incident, onBack }) {
@@ -134,6 +152,41 @@ export default function ResolvedDetail({ incident, onBack }) {
               <Text style={styles.placeholderText}>
                 {incident.location?.address || "Location unavailable"}
               </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Evidence */}
+        {(incident.evidence || []).length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Evidence</Text>
+            <View style={styles.evidenceWrap}>
+              {(incident.evidence || []).map((file, idx) => {
+                const url = resolveApiUrl(file?.url);
+                const mimeType = file?.mimeType || "";
+                const key = file?.fileId ?? `ev-${idx}`;
+                if (url && mimeType.startsWith("image/")) {
+                  return (
+                    <Image
+                      key={key}
+                      source={{ uri: url }}
+                      style={styles.evidenceImage}
+                      resizeMode="cover"
+                    />
+                  );
+                }
+                if (url && mimeType.startsWith("video/")) {
+                  return <EvidenceVideo key={key} url={url} />;
+                }
+                const kind = mimeType.startsWith("video/") ? "Video" : "Photo";
+                return (
+                  <View key={key} style={styles.evidencePill}>
+                    <Text style={styles.evidencePillText}>
+                      {kind} · {file?.sizeKb ?? 0} KB
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
           </View>
         )}
@@ -381,6 +434,38 @@ const styles = StyleSheet.create({
     color: LIGHT.textPrimary,
     fontWeight: "700",
     marginBottom: 6,
+  },
+  evidenceWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 2,
+  },
+  evidenceImage: {
+    width: "48%",
+    height: 140,
+    borderRadius: 10,
+    backgroundColor: LIGHT.inputBg,
+  },
+  evidenceVideo: {
+    width: "100%",
+    height: 200,
+    borderRadius: 10,
+    backgroundColor: "#000000",
+  },
+  evidencePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: LIGHT.inputBg,
+    borderWidth: 1,
+    borderColor: LIGHT.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  evidencePillText: {
+    fontSize: 12,
+    color: LIGHT.textSecondary,
   },
   detailRow: {
     flexDirection: "row",

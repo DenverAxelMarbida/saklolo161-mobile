@@ -76,6 +76,16 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
     }
   }
 
+  useEffect(() => {
+    if (cameraRef.current && gpsStatus === "locked") {
+      cameraRef.current.setCamera({
+        centerCoordinate: [location.longitude, location.latitude],
+        zoomLevel: 14,
+        animationMode: "flyTo",
+      });
+    }
+  }, [location.latitude, location.longitude, gpsStatus]);
+
   async function acquireGps() {
     setGpsStatus("locating");
     gpsAttempts.current = 0;
@@ -183,19 +193,23 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
           setEvidenceUploadFailed(0);
           const attachments = evidence;
           (async () => {
-            let failed = 0;
+            const failedDetails = [];
             for (const file of attachments) {
               try {
                 await uploadEvidence(incident.incidentId, file);
-              } catch {
-                failed += 1;
+              } catch (err) {
+                const reason =
+                  err?.response?.data?.message || err?.message || "upload failed";
+                failedDetails.push(`${file.name} — ${reason}`);
               }
             }
-            if (failed > 0) {
-              setEvidenceUploadFailed(failed);
+            if (failedDetails.length > 0) {
+              setEvidenceUploadFailed(failedDetails.length);
               Alert.alert(
                 "Attachments Incomplete",
-                `${failed} of ${attachments.length} attachments failed to upload. Your report was still submitted.`
+                `${failedDetails.length} of ${attachments.length} attachments failed to upload. Your report was still submitted.\n\n${failedDetails.join(
+                  "\n"
+                )}`
               );
             }
           })();
