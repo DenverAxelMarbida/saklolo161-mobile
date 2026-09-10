@@ -12,11 +12,21 @@ import {
   Circle,
   CheckCircle2,
   MapPin,
+  RefreshCw,
 } from "lucide-react-native";
 import axios from "axios";
 import { MAPBOX_TOKEN, API_BASE_URL } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
-import { getRecentIncidentIds } from "../../lib/storage";
+import {
+  getRecentIncidentIds,
+  getFailedEvidence,
+  clearFailedEvidence,
+  saveFailedEvidence,
+} from "../../lib/storage";
+import {
+  retryFailedEvidence,
+  updateEvidenceStatus,
+} from "../../lib/evidence";
 import { STEPS, stepIndexFor } from "../../lib/stepper";
 import useIncidentPolling from "../hooks/useIncidentPolling";
 
@@ -59,6 +69,40 @@ export default function DispatchTracker({
   const evidenceCompleted = (liveIncident?.evidence ?? []).length;
   const evidenceExpected = liveIncident?.evidenceExpectedCount ?? 0;
   const evidenceFailed = liveIncident?.evidenceFailedCount ?? 0;
+
+  // Transient retry session: { total, done, remaining }. Local component
+  // state only — the persisted failed files (AsyncStorage) are the
+  // durable source; the poll reflects results within 10s.
+  const [retryState, setRetryState] = useState(null);
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    if (retrying || !incidentId) return;
+    const files = await getFailedEvidence(incidentId);
+    if (files.length === 0) return;
+    setRetrying(true);
+    setRetryState({ total: files.length, done: 0, remaining: files.length });
+    const stillFailing = await retryFailedEvidence(
+      incidentId,
+      files,
+      ({ done, total }) =>
+        setRetryState({ total, done, remaining: total - done })
+    );
+    await saveFailedEvidence(incidentId, stillFailing);
+    await updateEvidenceStatus(incidentId, {
+      evidenceUploading: false,
+      evidenceFailedCount: stillFailing.length,
+    });
+    setRetryState({
+      total: files.length,
+      done: files.length - stillFailing.length,
+      remaining: stillFailing.length,
+    });
+    setRetrying(false);
+    if (stillFailing.length === 0) {
+      await clearFailedEvidence(incidentId);
+    }
+  };
 
   // Responding station lives at the TOP level of the incident
   // (incident.station.coords), not under incident.dispatch.
@@ -238,13 +282,37 @@ export default function DispatchTracker({
             </View>
           )}
 
-          {liveIncident && !isUploading && evidenceFailed > 0 && (
-            <View style={styles.failedBanner}>
-              <Text style={styles.failedText}>
-                ⚠ {evidenceFailed} attachment{evidenceFailed === 1 ? '' : 's'} failed — your report still came through.
+          {liveIncident && retrying && retryState && (
+            <View style={styles.uploadBanner}>
+              <Text style={styles.uploadText}>
+                ⏳ Retrying {retryState.done}/{retryState.total}…
               </Text>
             </View>
           )}
+
+          {liveIncident &&
+            !retrying &&
+            (retryState ? retryState.remaining : evidenceFailed) > 0 && (
+              <View style={styles.failedBanner}>
+                <Text style={styles.failedText}>
+                  ⚠{" "}
+                  {retryState ? retryState.remaining : evidenceFailed}{" "}
+                  attachment
+                  {(retryState ? retryState.remaining : evidenceFailed) === 1
+                    ? ""
+                    : "s"}{" "}
+                  failed — your report still came through.
+                </Text>
+                <TouchableOpacity
+                  style={styles.retryBtn}
+                  onPress={handleRetry}
+                  accessibilityLabel="Retry failed attachments"
+                >
+                  <RefreshCw size={14} color={THEMES.fireRed} />
+                  <Text style={styles.retryBtnText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
           {liveIncident && (
             <View style={styles.trackerBody}>
@@ -592,6 +660,23 @@ const styles = StyleSheet.create({
   failedText: {
     color: THEMES.fireRed,
     fontSize: 13,
+  },
+  retryBtn: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: THEMES.fireRed,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  retryBtnText: {
+    color: THEMES.fireRed,
+    fontSize: 13,
+    fontWeight: "700",
   },
   loadingContainer: {
     alignItems: "center",

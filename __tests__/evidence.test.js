@@ -2,6 +2,7 @@ import {
   appendEvidence,
   MAX_EVIDENCE,
   updateEvidenceStatus,
+  retryFailedEvidence,
 } from "../lib/evidence";
 
 jest.mock("axios", () => ({ post: jest.fn() }));
@@ -66,5 +67,57 @@ describe("updateEvidenceStatus", () => {
     await expect(
       updateEvidenceStatus("INC-123", { evidenceUploading: false, evidenceFailedCount: 1 })
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("retryFailedEvidence", () => {
+  const file = (name) => ({ uri: `file://${name}`, name, mimeType: "image/jpeg" });
+
+  beforeEach(() => {
+    axios.post.mockReset();
+  });
+
+  it("re-attempts each file and reports per-attempt progress", async () => {
+    axios.post.mockResolvedValue({ data: { success: true } });
+    const files = [file("a.jpg"), file("b.jpg")];
+    const progress = [];
+
+    const remaining = await retryFailedEvidence(
+      "INC-123",
+      files,
+      (p) => progress.push(p)
+    );
+
+    expect(remaining).toEqual([]);
+    expect(progress).toEqual([
+      { done: 1, total: 2 },
+      { done: 2, total: 2 },
+    ]);
+    // each file got its own upload request
+    expect(axios.post).toHaveBeenCalledTimes(2);
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.stringContaining("/api/incidents/INC-123/evidence"),
+      expect.anything(),
+      expect.objectContaining({ timeout: 30000 })
+    );
+  });
+
+  it("returns only the files that still fail", async () => {
+    axios.post.mockResolvedValueOnce({ data: { success: true } });
+    axios.post.mockRejectedValueOnce(new Error("upload failed"));
+    axios.post.mockResolvedValueOnce({ data: { success: true } });
+    const files = [file("a.jpg"), file("b.jpg"), file("c.jpg")];
+
+    const remaining = await retryFailedEvidence("INC-123", files);
+
+    expect(remaining).toEqual([file("b.jpg")]);
+  });
+
+  it("works without a progress callback", async () => {
+    axios.post.mockResolvedValue({ data: { success: true } });
+
+    const remaining = await retryFailedEvidence("INC-123", [file("a.jpg")]);
+
+    expect(remaining).toEqual([]);
   });
 });

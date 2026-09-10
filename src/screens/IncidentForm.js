@@ -26,13 +26,14 @@ import axios from "axios";
 import * as Location from "expo-location";
 import { API_BASE_URL, MAPBOX_TOKEN, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
-import { getSavedPhone, savePhone, saveIncidentId } from "../../lib/storage";
+import { getSavedPhone, savePhone, saveIncidentId, saveFailedEvidence, clearFailedEvidence } from "../../lib/storage";
 import {
   pickEvidence,
   captureEvidence,
   appendEvidence,
   uploadEvidence,
   updateEvidenceStatus,
+  retryFailedEvidence,
   MAX_EVIDENCE,
 } from "../../lib/evidence";
 
@@ -198,14 +199,21 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
           const attachments = evidence;
           (async () => {
             const failedDetails = [];
+            const failedFiles = [];
             for (const file of attachments) {
               try {
                 await uploadEvidence(incident.incidentId, file);
               } catch (err) {
                 const reason =
                   err?.response?.data?.message || err?.message || "upload failed";
+                failedFiles.push(file);
                 failedDetails.push(`${file.name} — ${reason}`);
               }
+            }
+            if (failedFiles.length > 0) {
+              // Persist the failed file objects so the Dispatch Tracker
+              // can offer a Retry after this screen unmounts.
+              await saveFailedEvidence(incident.incidentId, failedFiles);
             }
             // Always signal completion (even when nothing failed) so the
             // backend clears evidenceUploading and the dashboard stops
@@ -216,11 +224,44 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             });
             if (failedDetails.length > 0) {
               setEvidenceUploadFailed(failedDetails.length);
+              const tryAgain = async () => {
+                const stillFailing = await retryFailedEvidence(
+                  incident.incidentId,
+                  failedFiles,
+                );
+                if (stillFailing.length > 0) {
+                  await saveFailedEvidence(incident.incidentId, stillFailing);
+                  await updateEvidenceStatus(incident.incidentId, {
+                    evidenceUploading: false,
+                    evidenceFailedCount: stillFailing.length,
+                  });
+                  Alert.alert(
+                    "Retry Incomplete",
+                    `${stillFailing.length} of ${failedFiles.length} attachments still couldn't upload. You can retry them from the Dispatch Tracker.`
+                  );
+                } else {
+                  await clearFailedEvidence(incident.incidentId);
+                  await updateEvidenceStatus(incident.incidentId, {
+                    evidenceUploading: false,
+                    evidenceFailedCount: 0,
+                  });
+                  Alert.alert(
+                    "Attachments Uploaded",
+                    `All ${failedFiles.length} attachment${
+                      failedFiles.length === 1 ? "" : "s"
+                    } re-uploaded successfully.`
+                  );
+                }
+              };
               Alert.alert(
                 "Attachments Incomplete",
                 `${failedDetails.length} of ${attachments.length} attachments failed to upload. Your report was still submitted.\n\n${failedDetails.join(
                   "\n"
-                )}`
+                )}`,
+                [
+                  { text: "Done", style: "cancel" },
+                  { text: "Retry Attachments", onPress: tryAgain },
+                ]
               );
             }
           })();
