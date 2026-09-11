@@ -3,6 +3,7 @@ import {
   MAX_EVIDENCE,
   updateEvidenceStatus,
   retryFailedEvidence,
+  evidenceTimeoutFor,
 } from "../lib/evidence";
 
 jest.mock("axios", () => ({ post: jest.fn() }));
@@ -70,6 +71,26 @@ describe("updateEvidenceStatus", () => {
   });
 });
 
+describe("evidenceTimeoutFor", () => {
+  it("uses the generous 5-minute default when size is unknown", () => {
+    expect(evidenceTimeoutFor({})).toBe(300000);
+    expect(evidenceTimeoutFor()).toBe(300000);
+  });
+
+  it("never goes below the 1-minute floor for small files", () => {
+    expect(evidenceTimeoutFor({ fileSize: 1024 })).toBe(60000);
+  });
+
+  it("caps at 10 minutes for large files", () => {
+    expect(evidenceTimeoutFor({ fileSize: 1024 * 1024 * 1024 })).toBe(600000);
+  });
+
+  it("scales with file size in between the bounds", () => {
+    // 10 MB at the assumed uplink rate (~64 KB/s)
+    expect(evidenceTimeoutFor({ fileSize: 10 * 1024 * 1024 })).toBe(160000);
+  });
+});
+
 describe("retryFailedEvidence", () => {
   const file = (name) => ({ uri: `file://${name}`, name, mimeType: "image/jpeg" });
 
@@ -98,7 +119,7 @@ describe("retryFailedEvidence", () => {
     expect(axios.post).toHaveBeenCalledWith(
       expect.stringContaining("/api/incidents/INC-123/evidence"),
       expect.anything(),
-      expect.objectContaining({ timeout: 30000 })
+      expect.objectContaining({ timeout: evidenceTimeoutFor(file("a.jpg")) })
     );
   });
 
