@@ -38,7 +38,6 @@ import {
   evidenceUploadLikelyToTimeOut,
   formatEvidenceSize,
   formatEvidenceDuration,
-  estimateUploadSeconds,
   MAX_CAPTURE_DURATION_MS,
   MAX_EVIDENCE,
 } from "../../lib/evidence";
@@ -184,17 +183,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
     // instead of silently enqueueing an upload that will die mid-way.
     const risky = accepted.filter(evidenceUploadLikelyToTimeOut);
     if (risky.length) {
-      const detail = risky
-        .map(
-          (f) =>
-            `${f.name} (${formatEvidenceSize(f.fileSize)}, ~${Math.ceil(
-              estimateUploadSeconds(f) / 60
-            )} min on a slow connection)`
-        )
-        .join("\n");
       Alert.alert(
-        "Slow Upload Warning",
-        `Some files may take too long to upload on a slow connection and could time out before finishing:\n\n${detail}\n\nAttach them anyway? A failed upload can be re-sent later from the Dispatch Tracker.`,
+        "Slow Upload",
+        "This video is large and may take a while on a weak connection — the dispatcher may not get it. You can re-send it later.",
         [
           { text: "Don't attach", style: "cancel" },
           { text: "Attach anyway", onPress: () => attach(accepted) },
