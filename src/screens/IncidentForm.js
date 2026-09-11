@@ -35,6 +35,11 @@ import {
   updateEvidenceStatus,
   retryFailedEvidence,
   evidenceTooLarge,
+  evidenceUploadLikelyToTimeOut,
+  formatEvidenceSize,
+  formatEvidenceDuration,
+  estimateUploadSeconds,
+  MAX_CAPTURE_DURATION_MS,
   MAX_EVIDENCE,
 } from "../../lib/evidence";
 
@@ -149,27 +154,55 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   }, []);
 
   async function runChoice(kind, source) {
+    setChooser(null);
     const picked =
       source === "camera"
         ? await captureEvidence(kind)
         : await pickEvidence(kind, { multiple: kind === "photo" });
-    if (picked.length) {
-      const accepted = picked.filter((item) => !evidenceTooLarge(item));
-      const rejected = picked.length - accepted.length;
-      if (rejected > 0) {
-        Alert.alert(
-          "Attachment Too Large",
-          `${rejected} attachment${rejected === 1 ? "" : "s"} ${
-            rejected === 1 ? "is" : "are"
-          } over the 200MB upload limit and ${
-            rejected === 1 ? "was" : "were"
-          } skipped. Shorten the clip or lower the resolution.`
-        );
-      }
-      setEvidence((current) => appendEvidence(current, accepted));
-      setEvidenceUploadFailed(0);
+    if (!picked.length) return;
+    const accepted = picked.filter((item) => !evidenceTooLarge(item));
+    const rejected = picked.length - accepted.length;
+    if (rejected > 0) {
+      Alert.alert(
+        "Attachment Too Large",
+        `${rejected} attachment${rejected === 1 ? "" : "s"} ${
+          rejected === 1 ? "is" : "are"
+        } over the 200MB upload limit and ${
+          rejected === 1 ? "was" : "were"
+        } skipped. Shorten the clip or lower the resolution.`
+      );
     }
-    setChooser(null);
+    if (!accepted.length) return;
+
+    const attach = (items) => {
+      setEvidence((current) => appendEvidence(current, items));
+      setEvidenceUploadFailed(0);
+    };
+
+    // Pre-flight warning: on the pessimistic uplink these files can't
+    // finish before their timeout. Let the citizen bail or re-record
+    // instead of silently enqueueing an upload that will die mid-way.
+    const risky = accepted.filter(evidenceUploadLikelyToTimeOut);
+    if (risky.length) {
+      const detail = risky
+        .map(
+          (f) =>
+            `${f.name} (${formatEvidenceSize(f.fileSize)}, ~${Math.ceil(
+              estimateUploadSeconds(f) / 60
+            )} min on a slow connection)`
+        )
+        .join("\n");
+      Alert.alert(
+        "Slow Upload Warning",
+        `Some files may take too long to upload on a slow connection and could time out before finishing:\n\n${detail}\n\nAttach them anyway? A failed upload can be re-sent later from the Dispatch Tracker.`,
+        [
+          { text: "Don't attach", style: "cancel" },
+          { text: "Attach anyway", onPress: () => attach(accepted) },
+        ]
+      );
+      return;
+    }
+    attach(accepted);
   }
 
   async function handleSubmit() {
@@ -453,6 +486,14 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                     <Text style={styles.evidenceVideoName} numberOfLines={1}>
                       {item.name}
                     </Text>
+                    <Text style={styles.evidenceVideoMeta}>
+                      {item.fileSize
+                        ? formatEvidenceSize(item.fileSize)
+                        : "Size unknown"}
+                      {item.durationMs
+                        ? ` · ${formatEvidenceDuration(item.durationMs)}`
+                        : ""}
+                    </Text>
                   </View>
                 ) : (
                   <Image
@@ -537,7 +578,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 <Camera size={22} color={THEMES.darkNavy} />
               )}
               <Text style={styles.sheetOptionText}>
-                {chooser === "video" ? "Record a video" : "Take a photo"}
+                {chooser === "video"
+                  ? `Record a video (up to ${MAX_CAPTURE_DURATION_MS / 60000} min)`
+                  : "Take a photo"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -906,6 +949,13 @@ const styles = StyleSheet.create({
     color: LIGHT.textSecondary,
     fontSize: 11,
     paddingHorizontal: 12,
+  },
+  evidenceVideoMeta: {
+    color: LIGHT.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 12,
+    paddingBottom: 8,
   },
   evidenceRemoveBtn: {
     position: "absolute",
