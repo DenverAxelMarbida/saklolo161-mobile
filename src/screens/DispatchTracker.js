@@ -129,6 +129,23 @@ export default function DispatchTracker({
       ? routeState.coords
       : null;
 
+  // Arrival ETA has two sources with the same meaning (driving time from
+  // GET /api/routes): the live route fetch (freshest, matches the web
+  // dashboard) and the server-computed minutes stamped on the dispatch at
+  // dispatch time. Prefer the live value so the row updates if a route is
+  // ever recomputed; fall back to the dispatch stamp; else "—".
+  const arrivalEtaMinutes = liveIncident?.dispatch?.arrivalEtaMinutes;
+  const routeDurationSeconds =
+    routeState && routeState.incidentId === incidentId
+      ? routeState.durationSeconds
+      : null;
+  const drivingEtaValue =
+    routeDurationSeconds != null
+      ? `~${Math.round(routeDurationSeconds / 60)} min`
+      : arrivalEtaMinutes != null
+      ? `~${arrivalEtaMinutes} min`
+      : "—";
+
   useEffect(() => {
     if (!stationCoords || incidentLat == null || incidentLng == null) {
       return;
@@ -149,11 +166,20 @@ export default function DispatchTracker({
           },
         });
         if (cancelled) return;
-        const coords = res.data?.data?.geometry?.coordinates;
+        const data = res.data?.data;
+        const coords = data?.geometry?.coordinates;
         setRouteState({
           incidentId,
           coords:
             Array.isArray(coords) && coords.length >= 2 ? coords : fallback,
+          distanceMeters:
+            typeof data?.distanceMeters === "number"
+              ? data.distanceMeters
+              : null,
+          durationSeconds:
+            typeof data?.durationSeconds === "number"
+              ? data.durationSeconds
+              : null,
         });
       } catch {
         if (!cancelled) setRouteState({ incidentId, coords: fallback });
@@ -506,8 +532,14 @@ export default function DispatchTracker({
                       </Text>
                     </View>
                     <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Turnout</Text>
-                      <Text style={styles.detailValue}>
+                      <Text style={styles.detailLabel}>Driving ETA</Text>
+                      <Text style={styles.detailValue} testID="driving-eta">
+                        {drivingEtaValue}
+                      </Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Station readiness</Text>
+                      <Text style={styles.detailValue} testID="station-readiness">
                         {liveIncident.dispatch.estimatedTurnout}
                       </Text>
                     </View>
