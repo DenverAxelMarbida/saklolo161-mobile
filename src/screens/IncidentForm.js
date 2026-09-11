@@ -34,6 +34,7 @@ import {
   uploadEvidence,
   updateEvidenceStatus,
   retryFailedEvidence,
+  evidenceTooLarge,
   MAX_EVIDENCE,
 } from "../../lib/evidence";
 
@@ -957,4 +958,3 @@ const styles = StyleSheet.create({
   },
 });
 
-  evidenceTooLarge,
