@@ -34,6 +34,12 @@ import {
   uploadEvidence,
   updateEvidenceStatus,
   retryFailedEvidence,
+  evidenceTooLarge,
+  evidenceUploadLikelyToTimeOut,
+  formatEvidenceSize,
+  formatEvidenceDuration,
+  estimateUploadSeconds,
+  MAX_CAPTURE_DURATION_MS,
   MAX_EVIDENCE,
 } from "../../lib/evidence";
 
@@ -109,7 +115,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             maximumAge: 10000,
           });
         } catch {
-          // attempt failed — retry after a short pause for the next loop
+          // attempt failed â€” retry after a short pause for the next loop
           await new Promise((resolve) => setTimeout(resolve, 1200));
         }
       }
@@ -148,15 +154,55 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   }, []);
 
   async function runChoice(kind, source) {
+    setChooser(null);
     const picked =
       source === "camera"
         ? await captureEvidence(kind)
         : await pickEvidence(kind, { multiple: kind === "photo" });
-    if (picked.length) {
-      setEvidence((current) => appendEvidence(current, picked));
-      setEvidenceUploadFailed(0);
+    if (!picked.length) return;
+    const accepted = picked.filter((item) => !evidenceTooLarge(item));
+    const rejected = picked.length - accepted.length;
+    if (rejected > 0) {
+      Alert.alert(
+        "Attachment Too Large",
+        `${rejected} attachment${rejected === 1 ? "" : "s"} ${
+          rejected === 1 ? "is" : "are"
+        } over the 200MB upload limit and ${
+          rejected === 1 ? "was" : "were"
+        } skipped. Shorten the clip or lower the resolution.`
+      );
     }
-    setChooser(null);
+    if (!accepted.length) return;
+
+    const attach = (items) => {
+      setEvidence((current) => appendEvidence(current, items));
+      setEvidenceUploadFailed(0);
+    };
+
+    // Pre-flight warning: on the pessimistic uplink these files can't
+    // finish before their timeout. Let the citizen bail or re-record
+    // instead of silently enqueueing an upload that will die mid-way.
+    const risky = accepted.filter(evidenceUploadLikelyToTimeOut);
+    if (risky.length) {
+      const detail = risky
+        .map(
+          (f) =>
+            `${f.name} (${formatEvidenceSize(f.fileSize)}, ~${Math.ceil(
+              estimateUploadSeconds(f) / 60
+            )} min on a slow connection)`
+        )
+        .join("\n");
+      Alert.alert(
+        "Slow Upload Warning",
+        `Some files may take too long to upload on a slow connection and could time out before finishing:\n\n${detail}\n\nAttach them anyway? A failed upload can be re-sent later from the Dispatch Tracker.`,
+        [
+          { text: "Don't attach", style: "cancel" },
+          { text: "Attach anyway", onPress: () => attach(accepted) },
+        ]
+      );
+      return;
+    }
+    attach(accepted);
   }
 
   async function handleSubmit() {
@@ -207,7 +253,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 const reason =
                   err?.response?.data?.message || err?.message || "upload failed";
                 failedFiles.push(file);
-                failedDetails.push(`${file.name} — ${reason}`);
+                failedDetails.push(`${file.name} â€” ${reason}`);
               }
             }
             if (failedFiles.length > 0) {
@@ -356,7 +402,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 ? "GPS Locked"
                 : gpsStatus === "failed"
                 ? "GPS Failed"
-                : "Acquiring GPS…"}
+                : "Acquiring GPSâ€¦"}
             </Text>
           </View>
           {gpsStatus !== "locked" && (
@@ -368,7 +414,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             </TouchableOpacity>
           )}
           <Text style={[styles.address, gpsStatus !== "locked" && { color: LIGHT.textSecondary }]}>
-            {gpsStatus === "locked" ? location.address : "Waiting for your location…"}
+            {gpsStatus === "locked" ? location.address : "Waiting for your locationâ€¦"}
           </Text>
           {gpsStatus === "locked" && (
             <Text style={styles.coords}>
@@ -440,6 +486,14 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                     <Text style={styles.evidenceVideoName} numberOfLines={1}>
                       {item.name}
                     </Text>
+                    <Text style={styles.evidenceVideoMeta}>
+                      {item.fileSize
+                        ? formatEvidenceSize(item.fileSize)
+                        : "Size unknown"}
+                      {item.durationMs
+                        ? ` · ${formatEvidenceDuration(item.durationMs)}`
+                        : ""}
+                    </Text>
                   </View>
                 ) : (
                   <Image
@@ -495,7 +549,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         {evidenceUploadFailed > 0 && (
           <View style={styles.evidenceNote}>
             <Text style={styles.evidenceNoteText}>
-              Some attachments failed to upload — your report was still
+              Some attachments failed to upload â€” your report was still
               submitted. The dispatcher may ask you to resend them.
             </Text>
           </View>
@@ -524,7 +578,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 <Camera size={22} color={THEMES.darkNavy} />
               )}
               <Text style={styles.sheetOptionText}>
-                {chooser === "video" ? "Record a video" : "Take a photo"}
+                {chooser === "video"
+                  ? `Record a video (up to ${MAX_CAPTURE_DURATION_MS / 60000} min)`
+                  : "Take a photo"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -564,7 +620,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
               {gpsStatus !== "locked"
                 ? gpsStatus === "failed"
                   ? "WAITING FOR GPS"
-                  : "ACQUIRING LOCATION…"
+                  : "ACQUIRING LOCATIONâ€¦"
                 : "SUBMIT REPORT"}
             </Text>
           </>
@@ -894,6 +950,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     paddingHorizontal: 12,
   },
+  evidenceVideoMeta: {
+    color: LIGHT.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
   evidenceRemoveBtn: {
     position: "absolute",
     top: 20,
@@ -944,3 +1007,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
+

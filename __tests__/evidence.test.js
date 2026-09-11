@@ -3,6 +3,12 @@ import {
   MAX_EVIDENCE,
   updateEvidenceStatus,
   retryFailedEvidence,
+  evidenceTimeoutFor,
+  MAX_CAPTURE_DURATION_MS,
+  formatEvidenceSize,
+  formatEvidenceDuration,
+  estimateUploadSeconds,
+  evidenceUploadLikelyToTimeOut,
 } from "../lib/evidence";
 
 jest.mock("axios", () => ({ post: jest.fn() }));
@@ -70,6 +76,85 @@ describe("updateEvidenceStatus", () => {
   });
 });
 
+describe("evidenceTimeoutFor", () => {
+  it("uses the generous 5-minute default when size is unknown", () => {
+    expect(evidenceTimeoutFor({})).toBe(300000);
+    expect(evidenceTimeoutFor()).toBe(300000);
+  });
+
+  it("never goes below the 1-minute floor for small files", () => {
+    expect(evidenceTimeoutFor({ fileSize: 1024 })).toBe(60000);
+  });
+
+  it("caps at 10 minutes for large files", () => {
+    expect(evidenceTimeoutFor({ fileSize: 1024 * 1024 * 1024 })).toBe(600000);
+  });
+
+  it("scales with file size in between the bounds", () => {
+    // 10 MB at the assumed uplink rate (~64 KB/s)
+    expect(evidenceTimeoutFor({ fileSize: 10 * 1024 * 1024 })).toBe(160000);
+  });
+});
+
+describe("capture duration cap", () => {
+  it("keeps in-app video recording to 2 minutes", () => {
+    expect(MAX_CAPTURE_DURATION_MS).toBe(120000);
+  });
+});
+
+describe("formatEvidenceSize", () => {
+  it("formats bytes as megabytes with one decimal", () => {
+    expect(formatEvidenceSize(0)).toBe("0 MB");
+    expect(formatEvidenceSize(24.5 * 1024 * 1024)).toBe("24.5 MB");
+    expect(formatEvidenceSize(200 * 1024 * 1024)).toBe("200.0 MB");
+  });
+});
+
+describe("formatEvidenceDuration", () => {
+  it("formats milliseconds as a compact duration", () => {
+    expect(formatEvidenceDuration(0)).toBe("0s");
+    expect(formatEvidenceDuration(45000)).toBe("45s");
+    expect(formatEvidenceDuration(65000)).toBe("1m 05s");
+    expect(formatEvidenceDuration(120000)).toBe("2m 00s");
+  });
+});
+
+describe("estimateUploadSeconds", () => {
+  it("returns 0 when size is unknown or zero", () => {
+    expect(estimateUploadSeconds({})).toBe(0);
+    expect(estimateUploadSeconds({ fileSize: 0 })).toBe(0);
+  });
+
+  it("estimates at the pessimistic uplink rate (~64 KB/s)", () => {
+    expect(estimateUploadSeconds({ fileSize: 10 * 1024 * 1024 })).toBe(160);
+    expect(estimateUploadSeconds({ fileSize: 150 * 1024 * 1024 })).toBe(2400);
+  });
+});
+
+describe("evidenceUploadLikelyToTimeOut", () => {
+  it("warns only for files that exceed their own timeout budget", () => {
+    // 150 MB at ~512 Kbps ~ 40 min, way over the 10-min cap
+    expect(
+      evidenceUploadLikelyToTimeOut({ fileSize: 150 * 1024 * 1024 })
+    ).toBe(true);
+  });
+
+  it("is safe for mid-size and small files", () => {
+    // 30 MB and 10 MB finish within their scaled timeouts on the same link
+    expect(
+      evidenceUploadLikelyToTimeOut({ fileSize: 30 * 1024 * 1024 })
+    ).toBe(false);
+    expect(
+      evidenceUploadLikelyToTimeOut({ fileSize: 10 * 1024 * 1024 })
+    ).toBe(false);
+  });
+
+  it("is safe when size is unknown", () => {
+    expect(evidenceUploadLikelyToTimeOut({})).toBe(false);
+    expect(evidenceUploadLikelyToTimeOut()).toBe(false);
+  });
+});
+
 describe("retryFailedEvidence", () => {
   const file = (name) => ({ uri: `file://${name}`, name, mimeType: "image/jpeg" });
 
@@ -98,7 +183,7 @@ describe("retryFailedEvidence", () => {
     expect(axios.post).toHaveBeenCalledWith(
       expect.stringContaining("/api/incidents/INC-123/evidence"),
       expect.anything(),
-      expect.objectContaining({ timeout: 30000 })
+      expect.objectContaining({ timeout: evidenceTimeoutFor(file("a.jpg")) })
     );
   });
 
