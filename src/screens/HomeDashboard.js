@@ -8,11 +8,19 @@ import {
   Linking,
   RefreshControl,
   Image,
+  Animated,
+  Easing,
 } from "react-native";
 import {
   Phone,
   MapPin,
+  Sun,
+  CloudSun,
   Cloud,
+  CloudDrizzle,
+  CloudLightning,
+  CloudFog,
+  CloudSnow,
   Droplets,
   AlertTriangle,
   Shield,
@@ -24,6 +32,89 @@ import axios from "axios";
 import { API_BASE_URL, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { DISTRESS_NUMBERS } from "../../lib/hotlines";
+import { Enter, MOTION, usePressScale, useReducedMotion } from "../../lib/motion";
+
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
+
+// Emergency category tile: a gentle mount entrance (staggered across
+// the grid) plus a restrained press scale-down. Both are guarded by
+// reduce-motion — static content, activeOpacity still gives feedback.
+function CategoryCard({ color, label, Icon, index, onPress }) {
+  const reduced = useReducedMotion();
+  const [entrance] = React.useState(() => new Animated.Value(reduced ? 1 : 0));
+  const { scale, handlers } = usePressScale(0.965);
+
+  React.useEffect(() => {
+    if (reduced) {
+      entrance.setValue(1);
+      return undefined;
+    }
+    const timing = Animated.timing(entrance, {
+      toValue: 1,
+      duration: MOTION.card,
+      delay: 150 + index * 45,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    timing.start();
+    return () => timing.stop();
+  }, [reduced, entrance, index]);
+
+  return (
+    <AnimatedTouchable
+      style={[
+        styles.categoryCard,
+        { backgroundColor: color },
+        reduced
+          ? null
+          : {
+              opacity: entrance,
+              transform: [
+                {
+                  translateY: entrance.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [12, 0],
+                  }),
+                },
+                { scale },
+              ],
+            },
+      ]}
+      onPress={onPress}
+      onPressIn={handlers.onPressIn}
+      onPressOut={handlers.onPressOut}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={`Report ${label} emergency`}
+    >
+      <View style={styles.categoryIconWrap}>
+        <Icon size={24} color={THEMES.white} />
+      </View>
+      <Text style={styles.categoryLabel}>{label.toUpperCase()}</Text>
+    </AnimatedTouchable>
+  );
+}
+
+// Distress hotline tile: press-scale only (the row shares one entrance).
+function DistressButton({ number, onPress }) {
+  const { scale, handlers } = usePressScale(0.975);
+  const Icon = Phone;
+  return (
+    <AnimatedTouchable
+      style={[styles.distressBtn, { transform: [{ scale }] }]}
+      onPress={onPress}
+      onPressIn={handlers.onPressIn}
+      onPressOut={handlers.onPressOut}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`Call ${number.label} at ${number.display}`}
+    >
+      <Icon size={18} color={DISTRESS_COLORS[number.key] || THEMES.fireRed} />
+      <Text style={styles.distressLabel}>{number.label}</Text>
+      <Text style={styles.distressNumber}>{number.display}</Text>
+    </AnimatedTouchable>
+  );
+}
 
 const FALLBACK_WEATHER = {
   temperature: "28°C",
@@ -58,6 +149,35 @@ const RISK_COLORS = {
   "HIGH RISK": THEMES.fireRed,
 };
 
+// Deterministic condition → graphic mapping, keyed off the same
+// condition text the backend sends (OpenWeather `weather[0].main`
+// values like "Thunderstorm", plus its "Partly Cloudy" fallback).
+// The web WeatherCard maps these exact strings to the same semantic
+// keys — keep the two in sync. Unknown text degrades to Cloud.
+function weatherGraphicKey(condition = "") {
+  const c = String(condition).toLowerCase();
+  if (/thunder|storm|tornado|squall/.test(c)) return "storm";
+  if (/drizzle/.test(c)) return "drizzle";
+  if (/rain|shower/.test(c)) return "rain";
+  if (/snow|sleet|hail/.test(c)) return "snow";
+  if (/fog|mist|haze|smoke|smog|dust|sand|ash/.test(c)) return "fog";
+  if (/clear|sun/.test(c)) return "clear";
+  if (/partly/.test(c)) return "partly";
+  if (/cloud|overcast/.test(c)) return "cloud";
+  return "cloud";
+}
+
+const WEATHER_ICONS = {
+  clear: Sun,
+  partly: CloudSun,
+  cloud: Cloud,
+  rain: CloudRain,
+  drizzle: CloudDrizzle,
+  storm: CloudLightning,
+  fog: CloudFog,
+  snow: CloudSnow,
+};
+
 export default function HomeDashboard({ onCategoryPress }) {
   const [weather, setWeather] = useState(FALLBACK_WEATHER);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,9 +209,12 @@ export default function HomeDashboard({ onCategoryPress }) {
   }
 
   const riskColor = RISK_COLORS[weather.riskLevel] || THEMES.mintGreen;
+  const WeatherIcon =
+    WEATHER_ICONS[weatherGraphicKey(weather.condition)] || Cloud;
 
   return (
     <ScrollView
+      testID="home-scroll"
       style={styles.container}
       refreshControl={
         <RefreshControl
@@ -101,25 +224,36 @@ export default function HomeDashboard({ onCategoryPress }) {
         />
       }
     >
-      <View style={styles.topBar}>
-        <View>
-          <Text style={styles.eyebrow}>MARIKINA CITY MDRRMO</Text>
-          <Text style={styles.title}>SAKLOLO 161</Text>
+      <Enter delay={0} dy={8}>
+        <View style={styles.topBar}>
+          <View>
+            <Text style={styles.eyebrow}>MARIKINA CITY MDRRMO</Text>
+            <Text style={styles.title}>SAKLOLO 161</Text>
+          </View>
+          <Image
+            source={require("../../assets/icon.png")}
+            style={styles.logo}
+            resizeMode="contain"
+            accessibilityLabel="Saklolo 161 logo"
+          />
         </View>
-        <Image
-          source={require("../../assets/icon.png")}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-      </View>
+      </Enter>
 
-      <View style={styles.heroCard}>
+      <Enter delay={70} dy={12}>
+        <View style={styles.heroCard}>
         <View style={styles.weatherRow}>
-          <Cloud size={20} color={THEMES.white} />
           <Text style={styles.weatherLabel}>Current Weather</Text>
         </View>
-        <Text style={styles.temperature}>{weather.temperature}</Text>
-        <Text style={styles.condition}>{weather.condition}</Text>
+        {/* Compact row: the small graphic supports the temperature
+            instead of competing with it — weather is informational,
+            not the dashboard's focal point. */}
+        <View style={styles.weatherNow} testID="weather-now">
+          <WeatherIcon size={36} color={THEMES.white} />
+          <View style={styles.weatherNowText}>
+            <Text style={styles.temperature}>{weather.temperature}</Text>
+            <Text style={styles.condition}>{weather.condition}</Text>
+          </View>
+        </View>
         <Text style={styles.weatherDetail}>
           Humidity: {weather.humidity} | Wind: {weather.wind}
         </Text>
@@ -147,49 +281,50 @@ export default function HomeDashboard({ onCategoryPress }) {
             </View>
           </View>
         </View>
-      </View>
+        </View>
+      </Enter>
 
-      <Text style={styles.sectionTitle}>REPORT AN EMERGENCY</Text>
+      <Enter delay={140} dy={8}>
+        <Text style={styles.sectionTitle}>REPORT AN EMERGENCY</Text>
+      </Enter>
       <View style={styles.categoryGrid}>
-        {Object.entries(CATEGORY_DISPLAY).map(([key, label]) => {
+        {Object.entries(CATEGORY_DISPLAY).map(([key, label], index) => {
           const Icon = CATEGORY_ICONS[key];
           const color = CATEGORY_COLORS[key];
           return (
-            <TouchableOpacity
+            <CategoryCard
               key={key}
-              style={[styles.categoryCard, { backgroundColor: color }]}
+              index={index}
+              color={color}
+              label={label}
+              Icon={Icon}
               onPress={() => onCategoryPress(key)}
-              activeOpacity={0.85}
-            >
-              <View style={styles.categoryIconWrap}>
-                <Icon size={24} color={THEMES.white} />
-              </View>
-              <Text style={styles.categoryLabel}>{label.toUpperCase()}</Text>
-            </TouchableOpacity>
+            />
           );
         })}
       </View>
 
-      <Text style={styles.sectionTitle}>QUICK DISTRESS CALL</Text>
-      <View style={styles.distressRow}>
-        {DISTRESS_NUMBERS.map(({ key, label, display, dial }) => (
-          <TouchableOpacity
-            key={key}
-            style={styles.distressBtn}
-            onPress={() => handleDistressCall(dial)}
-            activeOpacity={0.7}
-          >
-            <Phone size={18} color={DISTRESS_COLORS[key] || THEMES.fireRed} />
-            <Text style={styles.distressLabel}>{label}</Text>
-            <Text style={styles.distressNumber}>{display}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <Enter delay={330} dy={8}>
+        <Text style={styles.sectionTitle}>QUICK DISTRESS CALL</Text>
+      </Enter>
+      <Enter delay={355} dy={8}>
+        <View style={styles.distressRow}>
+          {DISTRESS_NUMBERS.map((number) => (
+            <DistressButton
+              key={number.key}
+              number={number}
+              onPress={() => handleDistressCall(number.dial)}
+            />
+          ))}
+        </View>
+      </Enter>
 
-      <View style={styles.locationPill}>
-        <MapPin size={14} color={THEMES.mintGreen} />
-        <Text style={styles.locationText}>Marikina City, Philippines</Text>
-      </View>
+      <Enter delay={400} dy={8}>
+        <View style={styles.locationPill}>
+          <MapPin size={14} color={THEMES.mintGreen} />
+          <Text style={styles.locationText}>Marikina City, Philippines</Text>
+        </View>
+      </Enter>
 
       <View style={{ height: 40 }} />
     </ScrollView>
@@ -223,9 +358,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   logo: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 56,
+    height: 56,
+    borderRadius: 16,
     backgroundColor: THEMES.mintGreen,
   },
   heroCard: {
@@ -252,15 +387,24 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.6)",
     fontSize: 13,
   },
+  weatherNow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 6,
+  },
+  weatherNowText: {
+    flexShrink: 1,
+  },
   temperature: {
-    fontSize: 42,
+    fontSize: 26,
     color: THEMES.white,
     fontWeight: "700",
   },
   condition: {
-    fontSize: 16,
+    fontSize: 13,
     color: "rgba(255,255,255,0.8)",
-    marginTop: 2,
+    marginTop: 1,
   },
   weatherDetail: {
     fontSize: 13,
