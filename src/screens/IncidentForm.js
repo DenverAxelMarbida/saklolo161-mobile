@@ -11,6 +11,8 @@ import {
   Image,
   Modal,
   Pressable,
+  RefreshControl,
+  Animated,
 } from "react-native";
 import {
   ArrowLeft,
@@ -27,13 +29,16 @@ import * as Location from "expo-location";
 import { API_BASE_URL, MAPBOX_TOKEN, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { getSavedPhone, savePhone, saveIncidentId, saveFailedEvidence, clearFailedEvidence } from "../../lib/storage";
+import { Enter, MOTION, usePressScale } from "../../lib/motion";
 import {
   pickEvidence,
   captureEvidence,
   appendEvidence,
-  uploadEvidence,
+  uploadEvidenceResilient,
+  evidenceErrorMessage,
   updateEvidenceStatus,
   retryFailedEvidence,
+  reportEvidenceAttempt,
   evidenceTooLarge,
   evidenceUploadLikelyToTimeOut,
   formatEvidenceSize,
@@ -61,6 +66,8 @@ const INITIAL_LOCATION = {
   address: "Marikina City, Philippines",
 };
 
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
+
 export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
@@ -70,6 +77,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   const [evidence, setEvidence] = useState([]);
   const [evidenceUploadFailed, setEvidenceUploadFailed] = useState(0);
   const [chooser, setChooser] = useState(null); // null | "photo" | "video"
+  const [refreshing, setRefreshing] = useState(false);
+  const [focusedField, setFocusedField] = useState(null); // null | "phone" | "notes"
+  const submitScale = usePressScale(0.98);
   const gpsAttempts = useRef(0);
   const cameraRef = useRef(null);
 
@@ -114,7 +124,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             maximumAge: 10000,
           });
         } catch {
-          // attempt failed â€” retry after a short pause for the next loop
+          // attempt failed — retry after a short pause for the next loop
           await new Promise((resolve) => setTimeout(resolve, 1200));
         }
       }
@@ -151,6 +161,18 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
       acquireGps();
     })();
   }, []);
+
+  // Pull-to-refresh only re-acquires GPS/location. Notes, phone, category
+  // and evidence are deliberately untouched — refresh must never wipe an
+  // in-progress form or submit anything.
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      await acquireGps();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function runChoice(kind, source) {
     setChooser(null);
@@ -231,20 +253,28 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         }
         // Evidence upload is non-blocking: fire it in the background and
         // navigate immediately. A failed upload never fails the report.
+        // Each file gets bounded automatic retries for transient network
+        // failures before it counts as failed (manual Retry stays after).
         if (evidence.length) {
           setEvidenceUploadFailed(0);
           const attachments = evidence;
           (async () => {
             const failedDetails = [];
             const failedFiles = [];
-            for (const file of attachments) {
+            for (let i = 0; i < attachments.length; i++) {
+              const file = attachments[i];
               try {
-                await uploadEvidence(incident.incidentId, file);
+                await uploadEvidenceResilient(incident.incidentId, file, {
+                  index: i + 1,
+                  count: attachments.length,
+                  onAttempt: ({ attempt, total }) =>
+                    reportEvidenceAttempt(incident.incidentId, attempt, total),
+                });
               } catch (err) {
-                const reason =
-                  err?.response?.data?.message || err?.message || "upload failed";
                 failedFiles.push(file);
-                failedDetails.push(`${file.name} â€” ${reason}`);
+                failedDetails.push(
+                  `${file.name} — ${evidenceErrorMessage(err)}`
+                );
               }
             }
             if (failedFiles.length > 0) {
@@ -254,10 +284,12 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             }
             // Always signal completion (even when nothing failed) so the
             // backend clears evidenceUploading and the dashboard stops
-            // showing "attachments still uploading".
+            // showing "attachments still uploading". evidenceAttempt resets
+            // so a stale retry number never leaks into the next batch.
             await updateEvidenceStatus(incident.incidentId, {
               evidenceUploading: false,
               evidenceFailedCount: failedDetails.length,
+              evidenceAttempt: 1,
             });
             if (failedDetails.length > 0) {
               setEvidenceUploadFailed(failedDetails.length);
@@ -265,12 +297,18 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 const stillFailing = await retryFailedEvidence(
                   incident.incidentId,
                   failedFiles,
+                  undefined,
+                  {
+                    onAttempt: ({ attempt, total }) =>
+                      reportEvidenceAttempt(incident.incidentId, attempt, total),
+                  }
                 );
                 if (stillFailing.length > 0) {
                   await saveFailedEvidence(incident.incidentId, stillFailing);
                   await updateEvidenceStatus(incident.incidentId, {
                     evidenceUploading: false,
                     evidenceFailedCount: stillFailing.length,
+                    evidenceAttempt: 1,
                   });
                   Alert.alert(
                     "Retry Incomplete",
@@ -281,6 +319,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                   await updateEvidenceStatus(incident.incidentId, {
                     evidenceUploading: false,
                     evidenceFailedCount: 0,
+                    evidenceAttempt: 1,
                   });
                   Alert.alert(
                     "Attachments Uploaded",
@@ -306,11 +345,12 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         onSubmit(incident);
       }
     } catch (err) {
+      // Keep server-authored, user-facing messages; never surface raw
+      // axios/network error strings ("Network Error", "timeout of…").
       Alert.alert(
         "Submission Failed",
         err.response?.data?.message ||
-          err.message ||
-          "Could not submit report. Try again."
+          "Unable to submit your report. Check your connection and try again."
       );
     } finally {
       setLoading(false);
@@ -321,20 +361,35 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
   const categoryLabel = CATEGORY_DISPLAY[selectedCategory] || selectedCategory;
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      testID="report-form-scroll"
+      style={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={THEMES.darkNavy}
+        />
+      }
+    >
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={styles.backBtn}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <ArrowLeft size={20} color={THEMES.white} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Emergency Report</Text>
-        <View style={styles.stepBadge}>
-          <Text style={styles.stepText}>Step 2 of 2</Text>
-        </View>
       </View>
 
-      <View style={[styles.categoryBadge, { backgroundColor: categoryColor }]}>
-        <Text style={styles.categoryBadgeText}>{categoryLabel.toUpperCase()}</Text>
-      </View>
+      <Enter delay={0} dy={6} duration={MOTION.small}>
+        <View style={[styles.categoryBadge, { backgroundColor: categoryColor }]}>
+          <Text style={styles.categoryBadgeText}>{categoryLabel.toUpperCase()}</Text>
+        </View>
+      </Enter>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Location</Text>
@@ -393,11 +448,18 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                 ? "GPS Locked"
                 : gpsStatus === "failed"
                 ? "GPS Failed"
-                : "Acquiring GPSâ€¦"}
+                : "Acquiring GPS…"}
             </Text>
           </View>
           {gpsStatus !== "locked" && (
-            <TouchableOpacity onPress={acquireGps} style={styles.gpsRetryBtn} activeOpacity={0.7}>
+            <TouchableOpacity
+              onPress={acquireGps}
+              style={styles.gpsRetryBtn}
+              activeOpacity={0.7}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Retry location"
+            >
               <Navigation size={10} color={THEMES.darkNavy} />
               <Text style={styles.gpsRetryText}>
                 {gpsStatus === "failed" ? "Retry GPS" : "Refresh GPS"}
@@ -405,7 +467,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             </TouchableOpacity>
           )}
           <Text style={[styles.address, gpsStatus !== "locked" && { color: LIGHT.textSecondary }]}>
-            {gpsStatus === "locked" ? location.address : "Waiting for your locationâ€¦"}
+            {gpsStatus === "locked" ? location.address : "Waiting for your location…"}
           </Text>
           {gpsStatus === "locked" && (
             <Text style={styles.coords}>
@@ -415,17 +477,14 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Incident Details</Text>
+      <Enter delay={60} dy={10}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Incident Details</Text>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Category</Text>
           <View style={[styles.miniBadge, { backgroundColor: categoryColor }]}>
             <Text style={styles.miniBadgeText}>{categoryLabel.toUpperCase()}</Text>
           </View>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Priority</Text>
-          <Text style={styles.detailValue}>Standard</Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Reference</Text>
@@ -445,9 +504,15 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
 
         <Text style={[styles.detailLabel, { marginTop: 12 }]}>Phone Number</Text>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            focusedField === "phone" && styles.inputFocused,
+            focusedField === "phone" && { shadowColor: categoryColor },
+          ]}
           value={phone}
           onChangeText={setPhone}
+          onFocus={() => setFocusedField("phone")}
+          onBlur={() => setFocusedField(null)}
           placeholder="+639XXXXXXXXX"
           placeholderTextColor={LIGHT.textSecondary}
           keyboardType="phone-pad"
@@ -455,18 +520,27 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
 
         <Text style={[styles.detailLabel, { marginTop: 12 }]}>Notes</Text>
         <TextInput
-          style={[styles.input, styles.textArea]}
+          style={[
+            styles.input,
+            styles.textArea,
+            focusedField === "notes" && styles.inputFocused,
+            focusedField === "notes" && { shadowColor: categoryColor },
+          ]}
           value={notes}
           onChangeText={setNotes}
+          onFocus={() => setFocusedField("notes")}
+          onBlur={() => setFocusedField(null)}
           placeholder="Describe what you see..."
           placeholderTextColor={LIGHT.textSecondary}
           multiline
           numberOfLines={3}
         />
-      </View>
+        </View>
+      </Enter>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Evidence</Text>
+      <Enter delay={110} dy={10}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Evidence</Text>
         {evidence.length > 0 && (
           <View style={styles.evidenceList}>
             {evidence.map((item, index) => (
@@ -501,6 +575,11 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
                   }
                   style={styles.evidenceRemoveBtn}
                   activeOpacity={0.8}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    item.kind === "video" ? "Remove video" : "Remove photo"
+                  }
                 >
                   <X size={14} color={THEMES.white} />
                 </TouchableOpacity>
@@ -520,6 +599,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             disabled={evidence.length >= MAX_EVIDENCE}
             activeOpacity={0.7}
             onPress={() => setChooser("photo")}
+            accessibilityRole="button"
+            accessibilityLabel="Add photo"
+            accessibilityState={{ disabled: evidence.length >= MAX_EVIDENCE }}
           >
             <Camera size={24} color={THEMES.gray} />
             <Text style={styles.evidenceLabel}>Add Photo</Text>
@@ -532,6 +614,9 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
             disabled={evidence.length >= MAX_EVIDENCE}
             activeOpacity={0.7}
             onPress={() => setChooser("video")}
+            accessibilityRole="button"
+            accessibilityLabel="Add video"
+            accessibilityState={{ disabled: evidence.length >= MAX_EVIDENCE }}
           >
             <Video size={24} color={THEMES.gray} />
             <Text style={styles.evidenceLabel}>Add Video</Text>
@@ -540,12 +625,13 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         {evidenceUploadFailed > 0 && (
           <View style={styles.evidenceNote}>
             <Text style={styles.evidenceNoteText}>
-              Some attachments failed to upload â€” your report was still
+              Some attachments failed to upload — your report was still
               submitted. The dispatcher may ask you to resend them.
             </Text>
           </View>
         )}
-      </View>
+        </View>
+      </Enter>
 
       <Modal
         visible={chooser !== null}
@@ -562,6 +648,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
               style={styles.sheetOption}
               activeOpacity={0.7}
               onPress={() => chooser && runChoice(chooser, "camera")}
+              accessibilityRole="button"
             >
               {chooser === "video" ? (
                 <Video size={22} color={THEMES.darkNavy} />
@@ -578,6 +665,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
               style={styles.sheetOption}
               activeOpacity={0.7}
               onPress={() => chooser && runChoice(chooser, "library")}
+              accessibilityRole="button"
             >
               <Images size={22} color={THEMES.darkNavy} />
               <Text style={styles.sheetOptionText}>Choose from library</Text>
@@ -586,6 +674,7 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
               style={[styles.sheetOption, styles.sheetCancel]}
               activeOpacity={0.7}
               onPress={() => setChooser(null)}
+              accessibilityRole="button"
             >
               <Text style={styles.sheetCancelText}>Cancel</Text>
             </TouchableOpacity>
@@ -593,30 +682,44 @@ export default function IncidentForm({ selectedCategory, onBack, onSubmit }) {
         </Pressable>
       </Modal>
 
-      <TouchableOpacity
-        style={[
-          styles.submitBtn,
-          (loading || gpsStatus !== "locked") && styles.submitBtnDisabled,
-        ]}
-        onPress={handleSubmit}
-        disabled={loading || gpsStatus !== "locked"}
-        activeOpacity={0.8}
-      >
-        {loading ? (
-          <ActivityIndicator color={THEMES.white} />
-        ) : (
-          <>
-            <Send size={18} color={THEMES.white} />
-            <Text style={styles.submitText}>
-              {gpsStatus !== "locked"
-                ? gpsStatus === "failed"
-                  ? "WAITING FOR GPS"
-                  : "ACQUIRING LOCATIONâ€¦"
-                : "SUBMIT REPORT"}
-            </Text>
-          </>
-        )}
-      </TouchableOpacity>
+      <Enter delay={150} dy={10}>
+        <AnimatedTouchable
+          style={[
+            styles.submitBtn,
+            (loading || gpsStatus !== "locked") && styles.submitBtnDisabled,
+            { transform: [{ scale: submitScale.scale }] },
+          ]}
+          onPress={handleSubmit}
+          onPressIn={submitScale.handlers.onPressIn}
+          onPressOut={submitScale.handlers.onPressOut}
+          disabled={loading || gpsStatus !== "locked"}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={
+            loading
+              ? "Submitting your report"
+              : gpsStatus !== "locked"
+              ? "Submit report — location not ready yet"
+              : "Submit emergency report"
+          }
+          accessibilityState={{ disabled: loading || gpsStatus !== "locked" }}
+        >
+          {loading ? (
+            <ActivityIndicator color={THEMES.white} />
+          ) : (
+            <>
+              <Send size={18} color={THEMES.white} />
+              <Text style={styles.submitText}>
+                {gpsStatus !== "locked"
+                  ? gpsStatus === "failed"
+                    ? "WAITING FOR GPS"
+                    : "ACQUIRING LOCATION…"
+                  : "SUBMIT REPORT"}
+              </Text>
+            </>
+          )}
+        </AnimatedTouchable>
+      </Enter>
 
       <View style={{ height: 40 }} />
     </ScrollView>
@@ -650,17 +753,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: THEMES.white,
     fontWeight: "700",
-  },
-  stepBadge: {
-    backgroundColor: "rgba(255,255,255,0.1)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  stepText: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 11,
-    fontWeight: "600",
   },
   categoryBadge: {
     alignSelf: "center",
@@ -798,19 +890,26 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: LIGHT.border,
+    gap: 12,
   },
   detailLabel: {
     fontSize: 13,
     color: LIGHT.textSecondary,
+    // Label keeps a predictable width; long values own the rest and
+    // wrap inside their own column instead of overlapping the label.
+    flexShrink: 0,
   },
   detailValue: {
+    flex: 1,
+    flexShrink: 1,
     fontSize: 13,
     color: LIGHT.textPrimary,
     fontWeight: "600",
+    textAlign: "right",
   },
   miniBadge: {
     paddingHorizontal: 8,
@@ -829,6 +928,15 @@ const styles = StyleSheet.create({
     color: LIGHT.textPrimary,
     fontSize: 14,
     marginTop: 6,
+  },
+  // Focus reads as a soft category-tinted halo — no border-width
+  // change, so the layout never shifts while typing.
+  inputFocused: {
+    backgroundColor: LIGHT.bg,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
   },
   textArea: {
     height: 80,
@@ -881,6 +989,11 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 28,
     gap: 10,
+    shadowColor: "#111A3A",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 12,
   },
   sheetTitle: {
     fontSize: 15,
