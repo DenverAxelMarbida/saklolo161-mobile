@@ -6,6 +6,8 @@ import {
   Text,
   TouchableOpacity,
   BackHandler,
+  Animated,
+  Easing,
 } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
@@ -15,8 +17,10 @@ import IncidentForm from "./src/screens/IncidentForm";
 import DispatchTracker from "./src/screens/DispatchTracker";
 import ResolvedLog from "./src/screens/ResolvedLog";
 import ResolvedDetail from "./src/screens/ResolvedDetail";
+import StartupSplash from "./src/components/StartupSplash";
 import { THEMES } from "./lib/themes";
 import { MAPBOX_TOKEN } from "./lib/config";
+import { useReducedMotion } from "./lib/motion";
 
 let Mapbox;
 try {
@@ -26,12 +30,89 @@ try {
   // Mapbox not available
 }
 
+// `activeLabel` is the active tab's TEXT ink only — the brand icon
+// colors fail WCAG AA as 10px text (mint ≈2.5:1, red/blue ≈3.8:1 on
+// white), so the icon keeps its brand color while the label darkens.
+// `a11yLabel` gives screen readers an action-oriented name.
 const TABS = [
-  { key: "home", label: "Home", icon: House },
-  { key: "report", label: "Report", icon: FileText },
-  { key: "track", label: "Track", icon: Radio },
-  { key: "history", label: "History", icon: History },
+  { key: "home", label: "Home", icon: House, a11yLabel: "Open Home", activeLabel: "#1D4ED8" },
+  { key: "report", label: "Report", icon: FileText, a11yLabel: "Report emergency", activeLabel: "#B91C1C" },
+  { key: "track", label: "Track", icon: Radio, a11yLabel: "Open Track", activeLabel: "#047857" },
+  { key: "history", label: "History", icon: History, a11yLabel: "Open History", activeLabel: "#1D4ED8" },
 ];
+
+const SPLASH_DURATION_MS = 1500;
+
+// One bottom-nav tab: a top indicator bar that eases in on activation
+// plus a short opacity settle on the icon/label. Motion is decorative
+// only — colors, labels, testIDs, roles, and selected state are
+// untouched, and reduce motion renders the final state immediately.
+function TabItem({ tab, isActive, activeColor, onPress }) {
+  const reduced = useReducedMotion();
+  const indicator = React.useRef(new Animated.Value(0)).current;
+  const settle = React.useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (reduced) {
+      indicator.setValue(isActive ? 1 : 0);
+      settle.setValue(1);
+      return undefined;
+    }
+    Animated.timing(indicator, {
+      toValue: isActive ? 1 : 0,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    if (isActive) {
+      settle.setValue(0.55);
+      Animated.timing(settle, {
+        toValue: 1,
+        duration: 240,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    }
+    return undefined;
+  }, [isActive, reduced, indicator, settle]);
+
+  const Icon = tab.icon;
+  return (
+    <TouchableOpacity
+      style={styles.tabItem}
+      testID={`tab-${tab.key}`}
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityRole="tab"
+      accessibilityLabel={tab.a11yLabel}
+      accessibilityState={{ selected: isActive }}
+    >
+      {isActive ? (
+        <Animated.View
+          style={[
+            styles.tabIndicator,
+            {
+              backgroundColor: activeColor,
+              opacity: indicator,
+              transform: [{ scaleX: indicator }],
+            },
+          ]}
+        />
+      ) : null}
+      <Animated.View style={[styles.tabContent, { opacity: settle }]}>
+        <Icon size={20} color={isActive ? activeColor : THEMES.gray} />
+        <Text
+          style={[
+            styles.tabLabel,
+            isActive && { color: tab.activeLabel, fontWeight: "700" },
+          ]}
+        >
+          {tab.label}
+        </Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
 
 export default function App() {
   const [screen, setScreen] = useState("home");
@@ -39,6 +120,12 @@ export default function App() {
   const [incidentData, setIncidentData] = useState(null);
   const [isOffline, setIsOffline] = useState(false);
   const [resolvedIncident, setResolvedIncident] = useState(null);
+  const [booting, setBooting] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setBooting(false), SPLASH_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (MAPBOX_TOKEN && Mapbox && typeof Mapbox.setAccessToken === "function") {
@@ -108,11 +195,19 @@ export default function App() {
     return () => sub.remove();
   }, [screen, goHome, goHistory]);
 
+  function handleReportPress() {
+    // Report always lands on the reporting section (Home): with a tracked
+    // report that's where recent incidents live, and with none the
+    // category grid is the entry point for creating one. The old dead-end
+    // "No report yet" alert is gone by design — Home IS that section.
+    goHome();
+  }
+
   function handleTabPress(tab) {
     if (tab === "home") {
       goHome();
     } else if (tab === "report") {
-      goHome();
+      handleReportPress();
     } else if (tab === "track") {
       goTracker();
     } else if (tab === "history") {
@@ -131,73 +226,70 @@ export default function App() {
     <SafeAreaProvider>
       <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <StatusBar barStyle="light-content" backgroundColor={THEMES.darkNavy} />
-        <View style={styles.content}>
-          {isOffline && (
-            <View style={styles.offlineBanner}>
-              <WifiOff size={16} color="#FFFFFF" />
-              <View style={styles.offlineBody}>
-                <Text style={styles.offlineTitle}>You're offline</Text>
-                <Text style={styles.offlineText}>
-                  An active internet connection is required to report and track
-                  emergency incidents. Reconnect to continue submitting reports.
-                </Text>
-              </View>
+        {booting ? (
+          <StartupSplash />
+        ) : (
+          <>
+            <View style={styles.content}>
+              {isOffline && (
+                <View style={styles.offlineBanner}>
+                  <WifiOff size={16} color="#FFFFFF" />
+                  <View style={styles.offlineBody}>
+                    <Text style={styles.offlineTitle}>You're offline</Text>
+                    <Text style={styles.offlineText}>
+                      An active internet connection is required to report and
+                      track emergency incidents. Reconnect to continue
+                      submitting reports.
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {screen === "home" && <HomeDashboard onCategoryPress={navigateTo} />}
+              {screen === "form" && (
+                <IncidentForm
+                  selectedCategory={selectedCategory}
+                  onBack={goHome}
+                  onSubmit={navigateToTracker}
+                />
+              )}
+              {screen === "tracker" && (
+                <DispatchTracker
+                  incidentId={incidentData?.incidentId || null}
+                  initialIncident={incidentData}
+                  onBack={goHome}
+                />
+              )}
+              {screen === "history" && (
+                <ResolvedLog onBack={goHome} onSelect={openResolvedDetail} />
+              )}
+              {screen === "resolvedDetail" && (
+                <ResolvedDetail incident={resolvedIncident} onBack={goHistory} />
+              )}
             </View>
-          )}
 
-          {screen === "home" && <HomeDashboard onCategoryPress={navigateTo} />}
-          {screen === "form" && (
-            <IncidentForm
-              selectedCategory={selectedCategory}
-              onBack={goHome}
-              onSubmit={navigateToTracker}
-            />
-          )}
-          {screen === "tracker" && (
-            <DispatchTracker
-              incidentId={incidentData?.incidentId || null}
-              initialIncident={incidentData}
-              onBack={goHome}
-            />
-          )}
-          {screen === "history" && (
-            <ResolvedLog onBack={goHistory} onSelect={openResolvedDetail} />
-          )}
-          {screen === "resolvedDetail" && (
-            <ResolvedDetail incident={resolvedIncident} onBack={goHistory} />
-          )}
-        </View>
-
-        <View style={styles.tabBar}>
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab() === tab.key;
-            const activeColor =
-              tab.key === "report"
-                ? THEMES.fireRed
-                : tab.key === "track"
-                ? THEMES.mintGreen
-                : THEMES.floodBlue;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={styles.tabItem}
-                onPress={() => handleTabPress(tab.key)}
-                activeOpacity={0.7}
-              >
-                <Icon size={20} color={isActive ? activeColor : THEMES.gray} />
-                <Text
-                  style={[
-                    styles.tabLabel,
-                    isActive && { color: activeColor, fontWeight: "700" },
-                  ]}
-                >
-                  {tab.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+            <View style={styles.tabBar} accessibilityRole="tablist">
+              {TABS.map((tab) => {
+                const isActive = activeTab() === tab.key;
+                const activeColor =
+                  tab.key === "report"
+                    ? THEMES.fireRed
+                    : tab.key === "track"
+                    ? THEMES.mintGreen
+                    : THEMES.floodBlue;
+                return (
+                  <TabItem
+                    key={tab.key}
+                    tab={tab}
+                    isActive={isActive}
+                    activeColor={activeColor}
+                    onPress={() => handleTabPress(tab.key)}
+                  />
+                );
+              })}
+            </View>
+          </>
+        )}
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -240,12 +332,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     paddingBottom: 6,
     paddingTop: 4,
+    shadowColor: "#111A3A",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 10,
   },
   tabItem: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 6,
+  },
+  tabIndicator: {
+    position: "absolute",
+    top: 0,
+    width: 22,
+    height: 2.5,
+    borderRadius: 2,
+  },
+  tabContent: {
+    alignItems: "center",
     gap: 3,
   },
   tabLabel: {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../../lib/config";
 import { saveResolvedIncident, removeIncidentId } from "../../lib/storage";
@@ -10,6 +10,7 @@ export default function useIncidentPolling(incidentId) {
   const isMountedRef = useRef(true);
   const intervalRef = useRef(null);
   const lastIdRef = useRef(null);
+  const fetchRef = useRef(null);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -53,6 +54,7 @@ export default function useIncidentPolling(incidentId) {
       }
     }
 
+    fetchRef.current = fetchIncident;
     fetchIncident();
     intervalRef.current = setInterval(fetchIncident, 10000);
 
@@ -62,5 +64,13 @@ export default function useIncidentPolling(incidentId) {
     };
   }, [incidentId]);
 
-  return { incident, error, notFound };
+  // Manual refresh: reuses the exact same per-incident fetch the 10-second
+  // interval runs (same endpoint, same guards). The polling contract is
+  // unchanged — this only lets pull-to-refresh trigger one immediate pass.
+  const refetch = useCallback(() => {
+    if (fetchRef.current) return fetchRef.current();
+    return Promise.resolve();
+  }, []);
+
+  return { incident, error, notFound, refetch };
 }

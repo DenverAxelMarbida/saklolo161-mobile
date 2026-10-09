@@ -1,19 +1,29 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  RefreshControl,
 } from "react-native";
 import { ArrowLeft, MapPin, ShieldCheck } from "lucide-react-native";
 import { THEMES, LIGHT } from "../../lib/themes";
+import { CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
 import { getResolvedIncidents } from "../../lib/storage";
 import Skeleton from "../components/Skeleton";
+import { Enter, MOTION } from "../../lib/motion";
+import { formatTimestamp, resolvedTime } from "../../lib/format";
 
 export default function ResolvedLog({ onBack, onSelect }) {
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function loadList() {
+    const list = await getResolvedIncidents();
+    setIncidents(list);
+  }
 
   useEffect(() => {
     let active = true;
@@ -29,10 +39,36 @@ export default function ResolvedLog({ onBack, onSelect }) {
     };
   }, []);
 
+  // Pull-to-refresh re-reads the local resolved-incident storage — no
+  // server history endpoint exists or is needed.
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      await loadList();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  // Newest resolved first, keyed strictly on resolvedAt. Display-side
+  // only — storage keeps its insertion order untouched. Missing/garbage
+  // resolvedAt maps to epoch (sinks below timed records, incoming order
+  // among themselves; the comparator never throws).
+  const sorted = useMemo(
+    () => [...incidents].sort((a, b) => resolvedTime(b) - resolvedTime(a)),
+    [incidents],
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={styles.backBtn}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <ArrowLeft size={20} color={THEMES.white} />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
@@ -52,55 +88,81 @@ export default function ResolvedLog({ onBack, onSelect }) {
           <Skeleton height={130} radius={14} style={{ marginBottom: 12 }} />
           <Skeleton height={130} radius={14} />
         </View>
-      ) : incidents.length === 0 ? (
-        <View style={styles.center}>
-          <ShieldCheck size={40} color={THEMES.mintGreen} />
-          <Text style={styles.emptyTitle}>No resolved incidents yet</Text>
-          <Text style={styles.emptyText}>
-            Reports that get resolved by the dispatcher will show up here.
-          </Text>
-        </View>
       ) : (
         <ScrollView
+          testID="history-scroll"
           style={styles.list}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            incidents.length === 0 && styles.listContentEmpty,
+          ]}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={THEMES.darkNavy}
+            />
+          }
         >
-          {incidents.map((inc) => (
-            <TouchableOpacity
-              key={inc.incidentId}
-              style={styles.card}
-              onPress={() => onSelect && onSelect(inc)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.cardTop}>
-                <Text style={styles.refNumber}>{inc.incidentId}</Text>
-                <View style={styles.resolvedChip}>
-                  <ShieldCheck size={12} color="#065F46" />
-                  <Text style={styles.resolvedChipText}>RESOLVED</Text>
+          {            incidents.length === 0 ? (
+            <View style={styles.emptyBlock} testID="history-empty-state">
+              <ShieldCheck size={48} color={THEMES.mintGreen} />
+              <Text style={styles.emptyTitle}>No Recent History</Text>
+              <Text style={styles.emptyText}>
+                Your resolved reports will appear here.
+              </Text>
+            </View>
+          ) : (
+            sorted.map((inc, index) => {
+            const categoryKey = (inc.category || "").toUpperCase();
+            const categoryLabel =
+              CATEGORY_DISPLAY[categoryKey] || inc.category;
+            const categoryColor =
+              CATEGORY_COLORS[categoryKey] || THEMES.crimeSlate;
+            return (
+              // Staggered settle — capped so longer lists never feel
+              // like they are making the user wait.
+              <Enter
+                key={inc.incidentId}
+                delay={Math.min(index, 8) * 40}
+                dy={10}
+                duration={MOTION.card}
+              >
+              <TouchableOpacity
+                testID={`history-card-${inc.incidentId}`}
+                style={[
+                  styles.card,
+                  { borderLeftWidth: 4, borderLeftColor: categoryColor },
+                ]}
+                onPress={() => onSelect && onSelect(inc)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.cardTop}>
+                  <Text style={styles.refNumber}>{inc.incidentId}</Text>
+                  <View style={styles.resolvedChip}>
+                    <ShieldCheck size={12} color="#065F46" />
+                    <Text style={styles.resolvedChipText}>RESOLVED</Text>
+                  </View>
                 </View>
-              </View>
-              <Text style={styles.category}>{inc.category}</Text>
-              <View style={styles.metaRow}>
-                <MapPin size={13} color={LIGHT.textSecondary} />
-                <Text style={styles.address}>{inc.location?.address}</Text>
-              </View>
-              <View style={styles.metaRow}>
-                <Text style={styles.time}>
-                  Resolved{" "}
-                  {inc.timestamp
-                    ? new Date(inc.timestamp).toLocaleString("en-PH", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })
-                    : ""}
-                </Text>
-              </View>
-              <View style={styles.detailHint}>
-                <Text style={styles.detailHintText}>View details</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+                <Text style={styles.category}>{categoryLabel}</Text>
+                <View style={styles.metaRow}>
+                  <MapPin size={13} color={LIGHT.textSecondary} />
+                  <Text style={styles.address}>{inc.location?.address}</Text>
+                </View>
+                <View style={styles.metaRow}>
+                  <Text style={styles.time}>
+                    Resolved {formatTimestamp(inc.resolvedAt) || "—"}
+                  </Text>
+                </View>
+                <View style={styles.detailHint}>
+                  <Text style={styles.detailHintText}>View details</Text>
+                </View>
+              </TouchableOpacity>
+              </Enter>
+            );
+            })
+          )}
         </ScrollView>
       )}
     </View>
@@ -153,6 +215,18 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
+  emptyBlock: {
+    alignItems: "center",
+    gap: 8,
+    padding: 24,
+    // Designed panel rather than bare text floating on the background.
+    backgroundColor: LIGHT.inputBg,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: LIGHT.border,
+    borderStyle: "dashed",
+    marginHorizontal: 4,
+  },
   emptyTitle: {
     fontSize: 16,
     color: LIGHT.textPrimary,
@@ -171,6 +245,10 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
+  listContentEmpty: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
   card: {
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
@@ -179,9 +257,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: LIGHT.border,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
     elevation: 2,
   },
   cardTop: {

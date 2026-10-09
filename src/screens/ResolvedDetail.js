@@ -5,9 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
 } from "react-native";
-import { useVideoPlayer, VideoView } from "expo-video";
 import {
   ArrowLeft,
   MapPin,
@@ -17,14 +15,17 @@ import {
   Truck,
   Timer,
   FileText,
+  Phone,
 } from "lucide-react-native";
+import EvidenceGrid from "../components/EvidenceGrid";
 import { THEMES, LIGHT } from "../../lib/themes";
 import {
   CATEGORY_DISPLAY,
   CATEGORY_COLORS,
   MAPBOX_TOKEN,
-  resolveApiUrl,
 } from "../../lib/config";
+import { Enter, MOTION } from "../../lib/motion";
+import { formatTimestamp } from "../../lib/format";
 
 let MapView;
 let MapboxCamera;
@@ -39,29 +40,6 @@ try {
   // Mapbox not available
 }
 
-function formatTimestamp(isoString) {
-  if (!isoString) return "";
-  return new Date(isoString).toLocaleString("en-PH", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-function EvidenceVideo({ url }) {
-  const player = useVideoPlayer(url, (p) => {
-    p.loop = false;
-    p.playbackRate = 1;
-  });
-  return (
-    <VideoView
-      player={player}
-      style={styles.evidenceVideo}
-      allowsFullscreen
-      nativeControls
-    />
-  );
-}
-
 export default function ResolvedDetail({ incident, onBack }) {
   const rawCategory = incident.category;
   const categoryKey = (rawCategory || "").toUpperCase();
@@ -74,7 +52,14 @@ export default function ResolvedDetail({ incident, onBack }) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={styles.backBtn}
+          hitSlop={10}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <ArrowLeft size={20} color={THEMES.white} />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
@@ -92,21 +77,36 @@ export default function ResolvedDetail({ incident, onBack }) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Category banner */}
-        <View style={[styles.banner, { borderLeftColor: categoryColor }]}>
-          <View
-            style={[
-              styles.categoryChip,
-              { backgroundColor: `${categoryColor}1F` },
-            ]}
-          >
-            <View style={[styles.categoryDot, { backgroundColor: categoryColor }]} />
-            <Text style={[styles.categoryText, { color: categoryColor }]}>
-              {categoryDisplay}
-            </Text>
+        {/* Category banner — top row keeps the original chip + hint
+            layout; the resolution timestamp sits directly beneath the
+            hint as a standard detail row (label left, value right). */}
+        <Enter dy={6} duration={MOTION.small}>
+          <View style={[styles.banner, { borderLeftColor: categoryColor }]}>
+            <View style={styles.bannerTopRow}>
+              <View
+                style={[
+                  styles.categoryChip,
+                  { backgroundColor: `${categoryColor}1F` },
+                ]}
+              >
+                <View style={[styles.categoryDot, { backgroundColor: categoryColor }]} />
+                <Text style={[styles.categoryText, { color: categoryColor }]}>
+                  {categoryDisplay}
+                </Text>
+              </View>
+              <Text style={styles.bannerHint}>Report resolved by dispatcher</Text>
+            </View>
+            <View style={styles.bannerResolvedRow}>
+              <View style={styles.detailLabelWrap}>
+                <Clock size={15} color={LIGHT.textSecondary} />
+                <Text style={styles.detailLabel}>Resolved</Text>
+              </View>
+              <Text style={styles.detailValue}>
+                {formatTimestamp(incident.resolvedAt) || "—"}
+              </Text>
+            </View>
           </View>
-          <Text style={styles.bannerHint}>Report resolved by dispatcher</Text>
-        </View>
+        </Enter>
 
         {/* Map / location */}
         {MAPBOX_TOKEN && MapView && lat && lng ? (
@@ -158,40 +158,16 @@ export default function ResolvedDetail({ incident, onBack }) {
 
         {/* Evidence */}
         {(incident.evidence || []).length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Evidence</Text>
-            <View style={styles.evidenceWrap}>
-              {(incident.evidence || []).map((file, idx) => {
-                const url = resolveApiUrl(file?.url);
-                const mimeType = file?.mimeType || "";
-                const key = file?.fileId ?? `ev-${idx}`;
-                if (url && mimeType.startsWith("image/")) {
-                  return (
-                    <Image
-                      key={key}
-                      source={{ uri: url }}
-                      style={styles.evidenceImage}
-                      resizeMode="cover"
-                    />
-                  );
-                }
-                if (url && mimeType.startsWith("video/")) {
-                  return <EvidenceVideo key={key} url={url} />;
-                }
-                const kind = mimeType.startsWith("video/") ? "Video" : "Photo";
-                return (
-                  <View key={key} style={styles.evidencePill}>
-                    <Text style={styles.evidencePillText}>
-                      {kind} · {file?.sizeKb ?? 0} KB
-                    </Text>
-                  </View>
-                );
-              })}
+          <Enter delay={40} dy={10}>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Evidence</Text>
+              <EvidenceGrid evidence={incident.evidence} />
             </View>
-          </View>
+          </Enter>
         )}
 
         {/* Details card */}
+        <Enter delay={80} dy={10}>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Overview</Text>
 
@@ -202,6 +178,16 @@ export default function ResolvedDetail({ incident, onBack }) {
             </View>
             <Text style={styles.detailValue}>
               {incident.location?.address || "—"}
+            </Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <View style={styles.detailLabelWrap}>
+              <Phone size={15} color={LIGHT.textSecondary} />
+              <Text style={styles.detailLabel}>Phone Number</Text>
+            </View>
+            <Text style={styles.detailValue}>
+              {incident.citizenPhone || "—"}
             </Text>
           </View>
 
@@ -259,6 +245,7 @@ export default function ResolvedDetail({ incident, onBack }) {
             </View>
           ) : null}
         </View>
+        </Enter>
 
         <View style={{ height: 32 }} />
       </ScrollView>
@@ -328,9 +315,11 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   banner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    // Column: first the chip+hint row (original horizontal layout, now
+    // nested), then the Resolved timestamp row directly below the hint.
+    flexDirection: "column",
+    justifyContent: "flex-start",
+    alignItems: "stretch",
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
     borderLeftWidth: 4,
@@ -339,6 +328,25 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: LIGHT.border,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  bannerTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  bannerResolvedRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginTop: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: LIGHT.border,
   },
   categoryChip: {
     flexDirection: "row",
@@ -424,10 +432,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: LIGHT.border,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
   cardTitle: {
     fontSize: 14,
@@ -435,42 +443,12 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 6,
   },
-  evidenceWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 2,
-  },
-  evidenceImage: {
-    width: "48%",
-    height: 140,
-    borderRadius: 10,
-    backgroundColor: LIGHT.inputBg,
-  },
-  evidenceVideo: {
-    width: "100%",
-    height: 200,
-    borderRadius: 10,
-    backgroundColor: "#000000",
-  },
-  evidencePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: LIGHT.inputBg,
-    borderWidth: 1,
-    borderColor: LIGHT.border,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  evidencePillText: {
-    fontSize: 12,
-    color: LIGHT.textSecondary,
-  },
   detailRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    // Top-align so wrapped values (long station names/addresses) grow
+    // downward while the icon+label stays on the first line.
+    alignItems: "flex-start",
     paddingVertical: 9,
     borderBottomWidth: 1,
     borderBottomColor: LIGHT.border,
@@ -478,6 +456,9 @@ const styles = StyleSheet.create({
   },
   detailLabelWrap: {
     flexDirection: "row",
+    // Label column keeps its natural width; never collapses into the
+    // value's space.
+    flexShrink: 0,
     alignItems: "center",
     gap: 6,
   },
