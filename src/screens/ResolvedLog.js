@@ -5,11 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
 } from "react-native";
 import { ArrowLeft, MapPin, ShieldCheck } from "lucide-react-native";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { getResolvedIncidents } from "../../lib/storage";
+import Skeleton from "../components/Skeleton";
 
 export default function ResolvedLog({ onBack, onSelect }) {
   const [incidents, setIncidents] = useState([]);
@@ -42,8 +42,15 @@ export default function ResolvedLog({ onBack, onSelect }) {
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={THEMES.floodBlue} size="large" />
+        <View
+          style={styles.skeletonList}
+          testID="resolved-skeleton"
+          accessibilityLabel="Loading resolved incidents"
+          accessible
+        >
+          <Skeleton height={130} radius={14} style={{ marginBottom: 12 }} />
+          <Skeleton height={130} radius={14} style={{ marginBottom: 12 }} />
+          <Skeleton height={130} radius={14} />
         </View>
       ) : incidents.length === 0 ? (
         <View style={styles.center}>
@@ -141,6 +148,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 24,
     gap: 8,
+  },
+  skeletonList: {
+    flex: 1,
+    padding: 16,
   },
   emptyTitle: {
     fontSize: 16,

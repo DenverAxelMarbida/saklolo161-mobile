@@ -24,6 +24,7 @@ import axios from "axios";
 import { API_BASE_URL, CATEGORY_DISPLAY, CATEGORY_COLORS } from "../../lib/config";
 import { THEMES, LIGHT } from "../../lib/themes";
 import { DISTRESS_NUMBERS } from "../../lib/hotlines";
+import Skeleton from "../components/Skeleton";
 
 const FALLBACK_WEATHER = {
   temperature: "28°C",
@@ -58,17 +59,39 @@ const RISK_COLORS = {
   "HIGH RISK": THEMES.fireRed,
 };
 
+// The hero card is dark navy (#111A3A); the default skeleton tint is
+// invisible on it, so the loading placeholders get a light one.
+const HERO_SKELETON_TINT = "rgba(255,255,255,0.14)";
+
 export default function HomeDashboard({ onCategoryPress }) {
-  const [weather, setWeather] = useState(FALLBACK_WEATHER);
+  const [weather, setWeather] = useState(null);
+  const isFallback = weather === FALLBACK_WEATHER;
+  const [refreshError, setRefreshError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    let active = true;
     axios
       .get(`${API_BASE_URL}/api/weather-river`)
       .then((res) => {
-        if (res.data?.data) setWeather(res.data.data);
+        if (!active) return;
+        // A successful initial response means the connection works —
+        // any "Couldn't update" note from a pull-to-refresh that raced
+        // this first load is stale by definition.
+        setRefreshError(false);
+        if (res.data?.data) {
+          setWeather(res.data.data);
+        } else {
+          setWeather(FALLBACK_WEATHER);
+        }
       })
-      .catch(() => setWeather(FALLBACK_WEATHER));
+      .catch(() => {
+        if (!active) return;
+        setWeather(FALLBACK_WEATHER);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function onRefresh() {
@@ -77,9 +100,15 @@ export default function HomeDashboard({ onCategoryPress }) {
       const res = await axios.get(`${API_BASE_URL}/api/weather-river`);
       if (res.data?.data) {
         setWeather(res.data.data);
+        setRefreshError(false);
+      } else {
+        setRefreshError(true);
       }
     } catch {
-      setWeather(FALLBACK_WEATHER);
+      setRefreshError(true);
+      setWeather((current) =>
+        current === null ? FALLBACK_WEATHER : current
+      );
     }
     setRefreshing(false);
   }
@@ -88,13 +117,14 @@ export default function HomeDashboard({ onCategoryPress }) {
     Linking.openURL(`tel:${number}`);
   }
 
-  const riskColor = RISK_COLORS[weather.riskLevel] || THEMES.mintGreen;
+  const riskColor = RISK_COLORS[weather?.riskLevel] || THEMES.mintGreen;
 
   return (
     <ScrollView
       style={styles.container}
       refreshControl={
         <RefreshControl
+          testID="home-refresh-control"
           refreshing={refreshing}
           onRefresh={onRefresh}
           tintColor={THEMES.darkNavy}
@@ -114,39 +144,95 @@ export default function HomeDashboard({ onCategoryPress }) {
       </View>
 
       <View style={styles.heroCard}>
-        <View style={styles.weatherRow}>
-          <Cloud size={20} color={THEMES.white} />
-          <Text style={styles.weatherLabel}>Current Weather</Text>
-        </View>
-        <Text style={styles.temperature}>{weather.temperature}</Text>
-        <Text style={styles.condition}>{weather.condition}</Text>
-        <Text style={styles.weatherDetail}>
-          Humidity: {weather.humidity} | Wind: {weather.wind}
-        </Text>
+        {weather === null ? (
+          <View
+            testID="weather-loading"
+            accessibilityLabel="Loading weather"
+            accessible
+          >
+            <Skeleton height={44} width={140} radius={10} color={HERO_SKELETON_TINT} />
+            <Skeleton
+              height={18}
+              width={200}
+              radius={6}
+              color={HERO_SKELETON_TINT}
+              style={{ marginTop: 8 }}
+            />
+            <Skeleton
+              height={14}
+              width={240}
+              radius={6}
+              color={HERO_SKELETON_TINT}
+              style={{ marginTop: 6 }}
+            />
+            <Skeleton
+              height={26}
+              width={110}
+              radius={12}
+              color={HERO_SKELETON_TINT}
+              style={{ marginTop: 12 }}
+            />
+            <View style={styles.riverSection}>
+              <Skeleton height={62} radius={12} color={HERO_SKELETON_TINT} style={{ flex: 1 }} />
+              <Skeleton height={62} radius={12} color={HERO_SKELETON_TINT} style={{ flex: 1 }} />
+            </View>
+          </View>
+        ) : (
+          <>
+            <View style={styles.weatherRow}>
+              <Cloud size={20} color={THEMES.white} />
+              <Text style={styles.weatherLabel}>Current Weather</Text>
+            </View>
+            <Text style={styles.temperature}>{weather.temperature}</Text>
+            <Text style={styles.condition}>{weather.condition}</Text>
+            <Text style={styles.weatherDetail}>
+              Humidity: {weather.humidity} | Wind: {weather.wind}
+            </Text>
 
-        <View style={[styles.riskPill, { backgroundColor: riskColor }]}>
-          <AlertTriangle size={12} color={THEMES.darkNavy} />
-          <Text style={styles.riskText}>{weather.riskLevel}</Text>
-        </View>
+            <View style={[styles.riskPill, { backgroundColor: riskColor }]}>
+              <AlertTriangle size={12} color={THEMES.darkNavy} />
+              <Text style={styles.riskText}>{weather.riskLevel}</Text>
+            </View>
 
-        <View style={styles.riverSection}>
-          <View style={styles.riverCard}>
-            <Droplets size={16} color={THEMES.floodBlue} />
-            <View>
-              <Text style={styles.riverLabel}>River Level</Text>
-              <Text style={styles.riverValue}>
-                {weather.riverLevelMeters}m
+            <View style={styles.riverSection}>
+              <View style={styles.riverCard}>
+                <Droplets size={16} color={THEMES.floodBlue} />
+                <View>
+                  <Text style={styles.riverLabel}>River Level</Text>
+                  <Text style={styles.riverValue}>
+                    {weather.riverLevelMeters}m
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.riverCard}>
+                <MapPin size={16} color={THEMES.mintGreen} />
+                <View>
+                  <Text style={styles.riverLabel}>River Status</Text>
+                  <Text style={styles.riverValue}>{weather.riverStatus}</Text>
+                </View>
+              </View>
+            </View>
+
+            {isFallback && (
+              <Text
+                testID="weather-fallback-note"
+                style={styles.weatherNote}
+                accessibilityLabel="Showing sample weather because the live feed is unavailable"
+              >
+                Showing sample weather — live feed unavailable.
               </Text>
-            </View>
-          </View>
-          <View style={styles.riverCard}>
-            <MapPin size={16} color={THEMES.mintGreen} />
-            <View>
-              <Text style={styles.riverLabel}>River Status</Text>
-              <Text style={styles.riverValue}>{weather.riverStatus}</Text>
-            </View>
-          </View>
-        </View>
+            )}
+            {refreshError && (
+              <Text
+                testID="weather-refresh-error"
+                style={styles.weatherNote}
+                accessibilityLabel="Could not update weather, showing the last reading"
+              >
+                Couldn&apos;t update — showing last reading.
+              </Text>
+            )}
+          </>
+        )}
       </View>
 
       <Text style={styles.sectionTitle}>REPORT AN EMERGENCY</Text>
@@ -304,6 +390,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: THEMES.white,
     fontWeight: "600",
+  },
+  weatherNote: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.65)",
+    marginTop: 12,
+    lineHeight: 15,
   },
   sectionTitle: {
     fontSize: 12,
