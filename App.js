@@ -17,6 +17,8 @@ import IncidentForm from "./src/screens/IncidentForm";
 import DispatchTracker from "./src/screens/DispatchTracker";
 import ResolvedLog from "./src/screens/ResolvedLog";
 import ResolvedDetail from "./src/screens/ResolvedDetail";
+import PrivacyPolicy from "./src/screens/PrivacyPolicy";
+import TermsOfUse from "./src/screens/TermsOfUse";
 import StartupSplash from "./src/components/StartupSplash";
 import { THEMES } from "./lib/themes";
 import { MAPBOX_TOKEN } from "./lib/config";
@@ -173,6 +175,16 @@ export default function App() {
     setScreen("resolvedDetail");
   }
 
+  // Policy screens are informational only: no login, no new personal
+  // data. They open from the Home footer and return there.
+  function openPrivacyPolicy() {
+    setScreen("privacy");
+  }
+
+  function openTermsOfUse() {
+    setScreen("terms");
+  }
+
   const goHistory = useCallback(() => {
     setSelectedCategory(null);
     setIncidentData(null);
@@ -187,6 +199,10 @@ export default function App() {
         return true;
       }
       if (screen === "form" || screen === "tracker" || screen === "history") {
+        goHome();
+        return true;
+      }
+      if (screen === "privacy" || screen === "terms") {
         goHome();
         return true;
       }
@@ -245,7 +261,13 @@ export default function App() {
                 </View>
               )}
 
-              {screen === "home" && <HomeDashboard onCategoryPress={navigateTo} />}
+              {screen === "home" && (
+                <HomeDashboard
+                  onCategoryPress={navigateTo}
+                  onOpenPrivacy={openPrivacyPolicy}
+                  onOpenTerms={openTermsOfUse}
+                />
+              )}
               {screen === "form" && (
                 <IncidentForm
                   selectedCategory={selectedCategory}
@@ -266,6 +288,8 @@ export default function App() {
               {screen === "resolvedDetail" && (
                 <ResolvedDetail incident={resolvedIncident} onBack={goHistory} />
               )}
+              {screen === "privacy" && <PrivacyPolicy onBack={goHome} />}
+              {screen === "terms" && <TermsOfUse onBack={goHome} />}
             </View>
 
             <View style={styles.tabBar} accessibilityRole="tablist">

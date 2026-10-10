@@ -24,6 +24,7 @@ import {
   Droplets,
   AlertTriangle,
   Shield,
+  FileText,
   Flame,
   CloudRain,
   Siren,
@@ -183,7 +184,7 @@ const WEATHER_ICONS = {
   snow: CloudSnow,
 };
 
-export default function HomeDashboard({ onCategoryPress }) {
+export default function HomeDashboard({ onCategoryPress, onOpenPrivacy, onOpenTerms }) {
   const [weather, setWeather] = useState(null);
   const isFallback = weather === FALLBACK_WEATHER;
   const [refreshError, setRefreshError] = useState(false);
@@ -412,6 +413,34 @@ export default function HomeDashboard({ onCategoryPress }) {
         </View>
       </Enter>
 
+      <Enter delay={420} dy={8}>
+        <Text style={styles.sectionTitle}>ABOUT THIS APP</Text>
+      </Enter>
+      <Enter delay={435} dy={8}>
+        <View style={styles.policyLinks}>
+          <TouchableOpacity
+            testID="link-privacy-policy"
+            onPress={() => onOpenPrivacy?.()}
+            accessibilityRole="button"
+            accessibilityLabel="Open Privacy Policy"
+            style={styles.policyLink}
+          >
+            <Shield size={16} color={THEMES.floodBlue} />
+            <Text style={styles.policyLinkText}>Privacy Policy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            testID="link-terms-of-use"
+            onPress={() => onOpenTerms?.()}
+            accessibilityRole="button"
+            accessibilityLabel="Open Terms of Use"
+            style={styles.policyLink}
+          >
+            <FileText size={16} color={THEMES.floodBlue} />
+            <Text style={styles.policyLinkText}>Terms of Use</Text>
+          </TouchableOpacity>
+        </View>
+      </Enter>
+
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -633,5 +662,27 @@ const styles = StyleSheet.create({
     color: THEMES.mintGreen,
     fontSize: 12,
     fontWeight: "500",
+  },
+  policyLinks: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+  },
+  policyLink: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  policyLinkText: {
+    color: LIGHT.textPrimary,
+    fontSize: 13,
+    fontWeight: "700",
   },
 });
