@@ -1,4 +1,5 @@
 import React from "react";
+import { StyleSheet } from "react-native";
 import {
   render,
   screen,
@@ -6,7 +7,7 @@ import {
   act,
 } from "@testing-library/react-native";
 import App from "../App";
-import HomeDashboard from "../src/screens/HomeDashboard";
+import AboutScreen from "../src/screens/AboutScreen";
 import PrivacyPolicy from "../src/screens/PrivacyPolicy";
 import TermsOfUse from "../src/screens/TermsOfUse";
 
@@ -125,14 +126,39 @@ describe("TermsOfUse screen", () => {
   });
 });
 
-describe("Home footer policy links", () => {
+describe("Policy back buttons match the app-wide circle style", () => {
+  const CIRCLE_BACK_BTN = {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  };
+
+  it("Privacy Policy back button uses the circle style", async () => {
+    await render(<PrivacyPolicy onBack={jest.fn()} />);
+
+    // toMatchObject: the host TouchableOpacity injects its own opacity
+    // key in the test renderer — only the circle contract matters here.
+    expect(
+      StyleSheet.flatten(screen.getByTestId("privacy-back").props.style)
+    ).toMatchObject(CIRCLE_BACK_BTN);
+  });
+
+  it("Terms of Use back button uses the circle style", async () => {
+    await render(<TermsOfUse onBack={jest.fn()} />);
+
+    expect(
+      StyleSheet.flatten(screen.getByTestId("terms-back").props.style)
+    ).toMatchObject(CIRCLE_BACK_BTN);
+  });
+});
+
+describe("About screen policy links", () => {
   it("shows Privacy Policy and Terms of Use links", async () => {
     await render(
-      <HomeDashboard
-        onCategoryPress={jest.fn()}
-        onOpenPrivacy={jest.fn()}
-        onOpenTerms={jest.fn()}
-      />
+      <AboutScreen onOpenPrivacy={jest.fn()} onOpenTerms={jest.fn()} />
     );
 
     expect(screen.getByTestId("link-privacy-policy")).toBeTruthy();
@@ -143,11 +169,7 @@ describe("Home footer policy links", () => {
     const onOpenPrivacy = jest.fn();
     const onOpenTerms = jest.fn();
     await render(
-      <HomeDashboard
-        onCategoryPress={jest.fn()}
-        onOpenPrivacy={onOpenPrivacy}
-        onOpenTerms={onOpenTerms}
-      />
+      <AboutScreen onOpenPrivacy={onOpenPrivacy} onOpenTerms={onOpenTerms} />
     );
 
     await act(async () => {
@@ -163,9 +185,14 @@ describe("Home footer policy links", () => {
 });
 
 describe("App policy navigation", () => {
-  it("opens the Privacy Policy from Home and returns via back", async () => {
+  it("opens the Privacy Policy from About and returns via back", async () => {
     await render(<App />);
     await screen.findByText("REPORT AN EMERGENCY", {}, { timeout: 5000 });
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("tab-about"));
+    });
+    await screen.findByTestId("about-scroll", {}, { timeout: 5000 });
 
     await act(async () => {
       fireEvent.press(screen.getByTestId("link-privacy-policy"));
@@ -175,14 +202,17 @@ describe("App policy navigation", () => {
     await act(async () => {
       fireEvent.press(screen.getByTestId("privacy-back"));
     });
-    expect(
-      await screen.findByText("REPORT AN EMERGENCY", {}, { timeout: 5000 })
-    ).toBeTruthy();
+    expect(await screen.findByTestId("about-scroll")).toBeTruthy();
   }, 15000);
 
-  it("opens the Terms of Use from Home and returns via back", async () => {
+  it("opens the Terms of Use from About and returns via back", async () => {
     await render(<App />);
     await screen.findByText("REPORT AN EMERGENCY", {}, { timeout: 5000 });
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("tab-about"));
+    });
+    await screen.findByTestId("about-scroll", {}, { timeout: 5000 });
 
     await act(async () => {
       fireEvent.press(screen.getByTestId("link-terms-of-use"));
@@ -192,8 +222,6 @@ describe("App policy navigation", () => {
     await act(async () => {
       fireEvent.press(screen.getByTestId("terms-back"));
     });
-    expect(
-      await screen.findByText("REPORT AN EMERGENCY", {}, { timeout: 5000 })
-    ).toBeTruthy();
+    expect(await screen.findByTestId("about-scroll")).toBeTruthy();
   }, 15000);
 });

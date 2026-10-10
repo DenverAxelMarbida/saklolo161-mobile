@@ -8,15 +8,17 @@ import {
   BackHandler,
   Animated,
   Easing,
+  Modal,
 } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { House, FileText, Radio, History, WifiOff } from "lucide-react-native";
+import { House, Radio, History, Info, WifiOff } from "lucide-react-native";
 import HomeDashboard from "./src/screens/HomeDashboard";
 import IncidentForm from "./src/screens/IncidentForm";
 import DispatchTracker from "./src/screens/DispatchTracker";
 import ResolvedLog from "./src/screens/ResolvedLog";
 import ResolvedDetail from "./src/screens/ResolvedDetail";
+import AboutScreen from "./src/screens/AboutScreen";
 import PrivacyPolicy from "./src/screens/PrivacyPolicy";
 import TermsOfUse from "./src/screens/TermsOfUse";
 import StartupSplash from "./src/components/StartupSplash";
@@ -36,11 +38,13 @@ try {
 // colors fail WCAG AA as 10px text (mint ≈2.5:1, red/blue ≈3.8:1 on
 // white), so the icon keeps its brand color while the label darkens.
 // `a11yLabel` gives screen readers an action-oriented name.
+// Reporting is no longer a tab: the Emergency Report form slides up
+// over the tab interface from a Home category tap.
 const TABS = [
   { key: "home", label: "Home", icon: House, a11yLabel: "Open Home", activeLabel: "#1D4ED8" },
-  { key: "report", label: "Report", icon: FileText, a11yLabel: "Report emergency", activeLabel: "#B91C1C" },
   { key: "track", label: "Track", icon: Radio, a11yLabel: "Open Track", activeLabel: "#047857" },
   { key: "history", label: "History", icon: History, a11yLabel: "Open History", activeLabel: "#1D4ED8" },
+  { key: "about", label: "About", icon: Info, a11yLabel: "Open About", activeLabel: "#1D4ED8" },
 ];
 
 const SPLASH_DURATION_MS = 1500;
@@ -123,6 +127,14 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(false);
   const [resolvedIncident, setResolvedIncident] = useState(null);
   const [booting, setBooting] = useState(true);
+  // The Emergency Report is a native modal sheet above the tab
+  // interface: `reportOpen` mounts it, the OS slides it up. A modal
+  // renders in its own window above everything, so no manual
+  // translate/zIndex/elevation orchestration is needed — the form can
+  // never strand off-screen. Home stays mounted underneath, so
+  // closing lands there.
+  const [reportOpen, setReportOpen] = useState(false);
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     const timer = setTimeout(() => setBooting(false), SPLASH_DURATION_MS);
@@ -147,9 +159,29 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Home category tap → preselect the category and mount the report
+  // sheet. State-only: the native modal handles the slide-up itself.
   function navigateTo(category) {
     setSelectedCategory(category);
-    setScreen("form");
+    setReportOpen(true);
+  }
+
+  // Close control / Android back while the form is open: dismiss the
+  // modal instantly and clear the preselection, landing on Home.
+  // Idempotent — a second invocation (e.g. hardware back racing the
+  // modal's own onRequestClose) is a no-op on already-false state.
+  const closeReport = useCallback(() => {
+    if (!reportOpen) return;
+    setReportOpen(false);
+    setSelectedCategory(null);
+  }, [reportOpen]);
+
+  // Submission succeeded (backend accepted): swap to the Track tab
+  // with the new incident loaded.
+  function handleReportSubmit(incident) {
+    setReportOpen(false);
+    setSelectedCategory(null);
+    navigateToTracker(incident);
   }
 
   function navigateToTracker(incident) {
@@ -176,7 +208,7 @@ export default function App() {
   }
 
   // Policy screens are informational only: no login, no new personal
-  // data. They open from the Home footer and return there.
+  // data. They open from the About tab and return there.
   function openPrivacyPolicy() {
     setScreen("privacy");
   }
@@ -192,49 +224,56 @@ export default function App() {
     setScreen("history");
   }, []);
 
+  const goAbout = useCallback(() => {
+    setSelectedCategory(null);
+    setIncidentData(null);
+    setResolvedIncident(null);
+    setScreen("about");
+  }, []);
+
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (reportOpen) {
+        closeReport();
+        return true;
+      }
       if (screen === "resolvedDetail") {
         goHistory();
         return true;
       }
-      if (screen === "form" || screen === "tracker" || screen === "history") {
+      if (screen === "tracker" || screen === "history") {
+        goHome();
+        return true;
+      }
+      if (screen === "about") {
         goHome();
         return true;
       }
       if (screen === "privacy" || screen === "terms") {
-        goHome();
+        goAbout();
         return true;
       }
       return false;
     });
     return () => sub.remove();
-  }, [screen, goHome, goHistory]);
-
-  function handleReportPress() {
-    // Report always lands on the reporting section (Home): with a tracked
-    // report that's where recent incidents live, and with none the
-    // category grid is the entry point for creating one. The old dead-end
-    // "No report yet" alert is gone by design — Home IS that section.
-    goHome();
-  }
+  }, [screen, reportOpen, goHome, goHistory, goAbout, closeReport]);
 
   function handleTabPress(tab) {
     if (tab === "home") {
       goHome();
-    } else if (tab === "report") {
-      handleReportPress();
     } else if (tab === "track") {
       goTracker();
     } else if (tab === "history") {
       goHistory();
+    } else if (tab === "about") {
+      goAbout();
     }
   }
 
   function activeTab() {
     if (screen === "tracker") return "track";
-    if (screen === "form") return "report";
     if (screen === "history" || screen === "resolvedDetail") return "history";
+    if (screen === "about" || screen === "privacy" || screen === "terms") return "about";
     return "home";
   }
 
@@ -262,18 +301,7 @@ export default function App() {
               )}
 
               {screen === "home" && (
-                <HomeDashboard
-                  onCategoryPress={navigateTo}
-                  onOpenPrivacy={openPrivacyPolicy}
-                  onOpenTerms={openTermsOfUse}
-                />
-              )}
-              {screen === "form" && (
-                <IncidentForm
-                  selectedCategory={selectedCategory}
-                  onBack={goHome}
-                  onSubmit={navigateToTracker}
-                />
+                <HomeDashboard onCategoryPress={navigateTo} />
               )}
               {screen === "tracker" && (
                 <DispatchTracker
@@ -288,30 +316,58 @@ export default function App() {
               {screen === "resolvedDetail" && (
                 <ResolvedDetail incident={resolvedIncident} onBack={goHistory} />
               )}
-              {screen === "privacy" && <PrivacyPolicy onBack={goHome} />}
-              {screen === "terms" && <TermsOfUse onBack={goHome} />}
+              {screen === "privacy" && <PrivacyPolicy onBack={goAbout} />}
+              {screen === "terms" && <TermsOfUse onBack={goAbout} />}
+              {screen === "about" && (
+                <AboutScreen
+                  onOpenPrivacy={openPrivacyPolicy}
+                  onOpenTerms={openTermsOfUse}
+                />
+              )}
             </View>
 
-            <View style={styles.tabBar} accessibilityRole="tablist">
-              {TABS.map((tab) => {
-                const isActive = activeTab() === tab.key;
-                const activeColor =
-                  tab.key === "report"
-                    ? THEMES.fireRed
-                    : tab.key === "track"
-                    ? THEMES.mintGreen
-                    : THEMES.floodBlue;
-                return (
-                  <TabItem
-                    key={tab.key}
-                    tab={tab}
-                    isActive={isActive}
-                    activeColor={activeColor}
-                    onPress={() => handleTabPress(tab.key)}
-                  />
-                );
-              })}
-            </View>
+            {/* Emergency Report: a native modal sheet above the tab
+                interface. The OS slides it up and guarantees its
+                presentation — no manual translate/zIndex/elevation
+                orchestration that can strand it off-screen. Home stays
+                mounted underneath, so closing (back button, close
+                control, or Android back) lands there. The tab bar
+                stays unmounted for the duration. */}
+            <Modal
+              testID="report-sheet"
+              visible={reportOpen}
+              animationType={reducedMotion ? "none" : "slide"}
+              onRequestClose={closeReport}
+            >
+              <View style={styles.reportSheet}>
+                <IncidentForm
+                  selectedCategory={selectedCategory}
+                  onBack={closeReport}
+                  onSubmit={handleReportSubmit}
+                />
+              </View>
+            </Modal>
+
+            {!reportOpen && (
+              <View style={styles.tabBar} accessibilityRole="tablist">
+                {TABS.map((tab) => {
+                  const isActive = activeTab() === tab.key;
+                  const activeColor =
+                    tab.key === "track"
+                      ? THEMES.mintGreen
+                      : THEMES.floodBlue;
+                  return (
+                    <TabItem
+                      key={tab.key}
+                      tab={tab}
+                      isActive={isActive}
+                      activeColor={activeColor}
+                      onPress={() => handleTabPress(tab.key)}
+                    />
+                  );
+                })}
+              </View>
+            )}
           </>
         )}
       </SafeAreaView>
@@ -326,6 +382,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  reportSheet: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
   },
   offlineBanner: {
     flexDirection: "row",
