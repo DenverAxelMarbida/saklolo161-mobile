@@ -169,7 +169,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   backBtn: {
-    padding: 6,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   headerInfo: {
     flex: 1,
