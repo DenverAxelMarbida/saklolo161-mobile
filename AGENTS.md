@@ -8,7 +8,7 @@ in this repo — the citizen-facing incident-reporting app.
 
 | Repo | Stack | Relationship to this repo |
 |---|---|---|
-| `saklolo161-backend` | Express.js REST API, Render | This repo's only backend. Calls four public endpoints — see "API Contract." |
+| `saklolo161-backend` | Express.js REST API, Render | This repo's only backend. Calls public endpoints only — see "API Contract." |
 | `saklolo161-web` | React 19 + Vite + Tailwind | Dispatcher-facing, authenticated. Shares design tokens and one polling pattern with this repo — nothing else. Request its files before assuming shared logic; don't assume this repo mirrors it. |
 
 Mapping: pure Mapbox via `@rnmapbox/maps` — **not** `react-native-maps`,
@@ -21,14 +21,16 @@ prefixed `EXPO_PUBLIC_` or it's silently stripped from the bundle.
 - **Phase 2 (done):** Home Dashboard, Incident Form, Dispatch Tracker —
   merged and building clean. Task list used:
   `saklolo161-mobile-phase2-tasks.md`.
-- **Phase 3 (in progress):** real routed path on the tracker map (from
-  the new public `GET /api/routes`), evidence capture/upload
-  (`POST /api/incidents/:id/evidence`), and a Jest/RNTL test suite +
-  CI hygiene. The Firebase/Auth cutover happening in the other two repos
-  does NOT touch this app — it has no login and never will. Watch item:
-  if `GET /api/incidents/:id`'s shape ever changes as part of the
-  backend's Phase 3 work, update the contract slice below.
-  Task list: `../Phase 3/saklolo161-mobile-phase3-tasks.md`
+- **Phase 3 (done):** real routed path on the tracker map (from
+  `GET /api/routes`, straight-line fallback only on failure), evidence
+  capture/upload (`POST /api/incidents/:id/evidence` with bounded
+  retry + reconcile), driving ETA + station readiness on the tracker,
+  and a 13-file Jest test suite + CI hygiene (lint, test,
+  expo-doctor, android export check). The Firebase/Auth cutover in the
+  other two repos does NOT touch this app — it has no login and never
+  will. Watch item: if `GET /api/incidents/:id`'s shape ever changes,
+  update the contract slice below.
+  Frozen contract: `saklolo161-phase3-contracts.md`
 
 ## API Contract — this repo's slice only
 
@@ -37,14 +39,15 @@ prefixed `EXPO_PUBLIC_` or it's silently stripped from the bundle.
 | `POST /api/incidents` | None | Submit a new report. Rate-limited server-side per `citizenPhone` (~3 per 10 min) — don't hammer it while testing. |
 | `GET /api/incidents/:id` | None | Poll a single incident's status (gains `evidence[]` and `station.coords` when dispatched in Phase 3). |
 | `GET /api/routes?fromLat&fromLng&toLat&toLng` | None | Phase 3. Real route geometry + distance/ETA. Rate-limited. |
-| `POST /api/incidents/:id/evidence` | None | Phase 3. Multipart field `file`; returns `{ fileId, url, mimeType, sizeKb, uploadedAt }`. Rate-limited. |
+| `POST /api/incidents/:id/evidence` | None | Multipart field `file`; returns `{ fileId, url, mimeType, sizeKb, uploadedAt }`. Rate-limited. Uploads retry (bounded, with reconcile) via `lib/evidence.js`. |
+| `POST /api/incidents/:id/evidence-status` | None | Upload-progress telemetry for the web dashboard's benefit (best-effort, errors swallowed). Rate-limited. |
 
 **Hard rule: never call `GET /api/incidents` (the list endpoint).** It
 is dispatcher-only and requires a JWT this app will never have — it
 will 401. This repo tracks a citizen's own report(s) by ID via
 `GET /api/incidents/:id`, never by fetching the full list client-side.
 
-## Design Tokens (match `saklolo161-web`'s `src/index.css` exactly)
+## Design Tokens (match `saklolo161-web`'s `src/lib/config.js` category palette)
 
 | Token | Hex | Use |
 |---|---|---|
@@ -75,11 +78,10 @@ will 401. This repo tracks a citizen's own report(s) by ID via
    Numbers come from `../Phase 3/station-data-checklistCOMPLETE.md`
    (Part 2) — keep them in sync with the backend's
    `config/env.js` fallbacks.
-5. **Don't build custom station-to-incident routing math.** A real
-   Directions-API-backed route is planned to replace the web
-   dashboard's current straight-line placeholder too — this repo
-   should show a pin for now, not invent its own line-drawing logic
-   that both repos would need to throw away later.
+5. **Don't build custom station-to-incident routing math.** The
+   tracker draws the backend's `GET /api/routes` geometry and keeps
+   the 2-point straight line strictly as a fallback — never compute
+   routing client-side.
 6. **Don't simulate or auto-advance the incident status stepper.**
    Only three of the four steps (`Pending`/`Dispatched`/`Resolved`) are
    currently triggered by any client — a dispatcher on the web
@@ -129,29 +131,18 @@ data affect it more than a one-off request would:
    resubmissions don't burn through web's or another mobile tester's
    quota (or vice versa).
 5. A local backend also means test incidents/reports created while
-   iterating don't land in the same shared, resettable in-memory store
-   (`mockIncidents.js`) that other devs' test data is sitting in on
-   the live Render instance.
+   iterating don't collide with other devs' test data on the live
+   Render instance (which persists in Firebase RTDB).
 
 ## CI/CD
 
-`.github/workflows/ci.yml` currently only does `checkout` → `setup-node
-18` → `npm ci --legacy-peer-deps || npm install` — no lint/build/test
-step, so a broken import can merge with CI green. Phase 3 closes this
-(see `../Phase 3/saklolo161-mobile-phase3-tasks.md`, task 3): add a lint
-step, then `expo-doctor`/`expo export` only once they go green on the
-stable baseline, plus a Jest/RNTL suite. A red check people learn to
-ignore is worse than no check — add each step when it's actually green,
-not before.
+`.github/workflows/ci.yml` runs on PRs to `main`: `setup-node 22` →
+`npm ci --legacy-peer-deps` → `npm run lint` → `npm test` (Jest) →
+`expo-doctor` → `expo export --platform android` check. Keep every step
+green — a red check people learn to ignore is worse than no check.
 
 ## Known Gaps / Backlog
 
 - No real GPS/telemetry-based "En Route" detection — manual dispatcher
   action on web is the trigger for now (see Hard Rule 6). Held: needs a
   responder client to generate telemetry; not planned this round.
-- No real routed path on the tracker map — Phase 3 task 1 draws
-  `GET /api/routes` geometry (straight-line fallback until then).
-- Evidence (photo/video) attachment wiring is UI-stub-only — Phase 3
-  task 2 wires capture + upload to `POST /api/incidents/:id/evidence`.
-- No test suite (Jest/RNTL or otherwise) — Phase 3 task 3 (see
-  "CI/CD" above).

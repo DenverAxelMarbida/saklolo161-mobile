@@ -15,11 +15,12 @@ reference the backend prompt verifies against.
 - `GET /api/incidents` (list) — **dispatcher-only** (Bearer token).
 - New Phase 3 routes staying public (rate-limited per phone like incidents): `GET /api/routes`, `POST /api/incidents/:id/evidence`.
 
-**Status: backend slice SHIPPED + verified live on Render (2026-09-08).**
+**Status: backend slice SHIPPED + verified live on Render (2026-09-08),
+and the auth cutover below has since landed on both sides (backend
+`verifyIdToken`, web Firebase client SDK).**
 Web and mobile may build against these shapes now — nothing below is a
 proposal. `station` sits at the **top level** of an incident (not under
-`dispatch`). The auth cutover ("Auth cutover" track at the bottom) remains
-a coordinated window.
+`dispatch`).
 
 ---
 
@@ -72,11 +73,11 @@ River level becomes live PAGASA data when reachable; on any failure the
 backend silently returns today's exact mock values (15.2 / "Normal" /
 "LOW RISK"). Clients cannot tell and must not care.
 
-## Auth cutover (Track 1 — coordinated window only)
+## Auth cutover (Track 1 — landed; historical record)
 - `Authorization: Bearer <Firebase ID token>` — the *token type* changes
   (Firebase ID token instead of signed JWT); the **payload shape
   `{ uid, email, agency, role }` is unchanged** (backend maps Firebase
   custom claims).
-- `POST /api/auth/login` may be removed once the web client signs in via
-  the Firebase client SDK — coordinated with the web `auth.js` swap, per
-  `saklolo161-auth-coordination.md`. Mobile is unaffected.
+- `POST /api/auth/login` was **kept** as an Auth-REST bridge (web signs
+  in via the Firebase client SDK; the endpoint remains for
+  compatibility + CI smoke tests). Mobile is unaffected.
