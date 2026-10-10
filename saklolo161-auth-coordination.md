@@ -1,5 +1,17 @@
 # Saklolo161 — Auth Cutover Coordination Window (Phase 3, Track 1)
 
+> **COMPLETED.** Backend and web both run Firebase Auth in production.
+> What follows is the historical record — do not re-execute it. Any
+> future auth migration is a new coordinated window.
+>
+> As landed: backend `login()` uses Auth REST `signInWithPassword` and
+> `verifyToken()` uses `verifyIdToken()`; web `auth.js` uses the
+> Firebase client SDK with legacy localStorage keys purged (forced
+> re-login effective). One deviation from the plan below:
+> `POST /api/auth/login` was **kept** (Auth-REST bridge for
+> compatibility + CI smoke tests), not removed. Mobile unchanged, as
+> planned.
+
 This is the **one cross-repo coordinated change** in Phase 3. Everything
 else is independently delegable. Tunnel-vision three rules:
 
@@ -19,12 +31,12 @@ else is independently delegable. Tunnel-vision three rules:
 | web | env | `VITE_FIREBASE_API_KEY` etc. added (prefixed `VITE_` or stripped from the bundle). |
 | backend | `scripts/provisionUser.js` | Re-provision staff accounts in Firebase (or replace with an admin-SDK provisioning script). |
 
-## Pre-window checklist (days before)
-- [ ] Firebase project exists; web + admin SDK config in hand.
-- [ ] Custom claims mapping defined: user record → `{ agency, role }`.
-- [ ] `scripts/provisionUser.js` reproduces the existing mockUsers accounts.
-- [ ] A **forced re-login** communicated to dispatchers (existing sessions
-      will not survive the token-format change).
+## Pre-window checklist (days before) — all done
+- [x] Firebase project exists; web + admin SDK config in hand.
+- [x] Custom claims mapping defined: user record → `{ agency, role }`.
+- [x] `scripts/provisionUser.js` reproduces the existing mockUsers accounts.
+- [x] A **forced re-login** communicated to dispatchers (existing sessions
+  will not survive the token-format change).
 
 ## Window execution order
 1. Backend branch: authService + firebase.js + /stations seed → PR.
