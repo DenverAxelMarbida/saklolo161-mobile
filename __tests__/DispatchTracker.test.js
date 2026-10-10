@@ -84,6 +84,8 @@ jest.mock("../lib/storage", () => ({
   getFailedEvidence: jest.fn(() => Promise.resolve([])),
   clearFailedEvidence: jest.fn(() => Promise.resolve()),
   saveFailedEvidence: jest.fn(() => Promise.resolve([])),
+  saveResolvedIncident: jest.fn(() => Promise.resolve()),
+  removeIncidentId: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock("../lib/evidence", () => ({
@@ -121,6 +123,23 @@ let mockProgressListener = null;
 jest.mock("axios", () => ({
   get: jest.fn(),
 }));
+
+jest.mock("@rnmapbox/maps", () => ({}));
+
+const INCIDENT = {
+  incidentId: "INC-77",
+  category: "Flood",
+  status: "Dispatched",
+  timestamp: "2026-10-09T00:00:00.000Z",
+  location: { longitude: 121.1, latitude: 14.6, address: "Marikina City" },
+  station: { coords: { lat: 14.65, lng: 121.1 } },
+};
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  axios.get.mockReturnValue(new Promise(() => {}));
+  getRecentIncidentIds.mockReturnValue(new Promise(() => {}));
+});
 
 function makeDispatchedIncident(overrides = {}) {
   return {
@@ -1228,11 +1247,11 @@ describe("Uploaded evidence in Track detail", () => {
       ...DEFAULT_HOOK_VALUE,
       incident: settled,
     }));
-    rerender(
-      <DispatchTracker
-        incidentId={uploading.incidentId}
-        initialIncident={settled}
-        onBack={jest.fn()}
+      rerender(
+        <DispatchTracker
+          incidentId={uploading.incidentId}
+          initialIncident={settled}
+          onBack={jest.fn()}
       />
     );
 
@@ -1306,5 +1325,74 @@ describe("Track incident details — citizen phone and resilient rows", () => {
     // …while the label column keeps its predictable width.
     expect(screen.getByText("Station")).toHaveStyle({ flexShrink: 0 });
     expect(screen.getByText("Location")).toHaveStyle({ flexShrink: 0 });
+  });
+});
+
+describe("DispatchTracker recent-IDs picker", () => {
+  it("shows a loading state while recent IDs are being read", async () => {
+    await render(<DispatchTracker onBack={jest.fn()} />);
+
+    expect(await screen.findByTestId("picker-loading")).toBeTruthy();
+    expect(screen.queryByText("No recent incidents found.")).toBeNull();
+  });
+
+  it("shows the empty state only after recent IDs finish loading", async () => {
+    getRecentIncidentIds.mockResolvedValue([]);
+
+    await render(<DispatchTracker onBack={jest.fn()} />);
+
+    expect(await screen.findByTestId("track-empty-state")).toBeTruthy();
+    expect(screen.queryByTestId("picker-loading")).toBeNull();
+  });
+
+  it("lists recent incident IDs once loading completes", async () => {
+    getRecentIncidentIds.mockResolvedValue(["INC-2", "INC-1"]);
+    mockIncidentEndpointsById({
+      "INC-2": makeDispatchedIncident({ incidentId: "INC-2" }),
+      "INC-1": makeDispatchedIncident({ incidentId: "INC-1" }),
+    });
+
+    await render(<DispatchTracker onBack={jest.fn()} />);
+
+    expect(await screen.findByText("INC-2")).toBeTruthy();
+    expect(screen.getByText("INC-1")).toBeTruthy();
+    expect(screen.queryByTestId("picker-loading")).toBeNull();
+  });
+});
+
+describe("DispatchTracker route indicator", () => {
+  it("shows a calculating-route chip while route geometry is in flight", async () => {
+    let resolveRoute;
+    axios.get.mockImplementation((url) => {
+      if (url.includes("/api/routes")) {
+        return new Promise((resolve) => {
+          resolveRoute = resolve;
+        });
+      }
+      return Promise.resolve({ data: { data: INCIDENT } });
+    });
+
+    await render(
+      <DispatchTracker
+        incidentId="INC-77"
+        initialIncident={INCIDENT}
+        onBack={jest.fn()}
+      />
+    );
+
+    expect(await screen.findByTestId("route-chip")).toBeTruthy();
+    expect(screen.getByText("Calculating route\u2026")).toBeTruthy();
+
+    await act(async () => {
+      resolveRoute({
+        data: {
+          data: { geometry: { coordinates: [[121.1, 14.65], [121.1, 14.6]] } },
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("route-chip")).toBeNull()
+    );
   });
 });

@@ -525,3 +525,43 @@ describe("ResolvedLog — live production payload regression (captured 2026-10-0
     expect(screen.getByText("Resolved —")).toBeTruthy();
   });
 });
+
+describe("ResolvedLog loading states", () => {
+  it("shows a skeleton instead of a blank screen while history loads", async () => {
+    getResolvedIncidents.mockReturnValue(new Promise(() => {}));
+
+    await render(<ResolvedLog onBack={jest.fn()} onSelect={jest.fn()} />);
+
+    expect(await screen.findByTestId("resolved-skeleton")).toBeTruthy();
+    expect(screen.queryByText("No Recent History")).toBeNull();
+  });
+
+  it("shows the empty message only after history finishes loading", async () => {
+    getResolvedIncidents.mockResolvedValue([]);
+
+    await render(<ResolvedLog onBack={jest.fn()} onSelect={jest.fn()} />);
+
+    expect(
+      await screen.findByText("No Recent History", {}, { timeout: 5000 })
+    ).toBeTruthy();
+    expect(screen.queryByTestId("resolved-skeleton")).toBeNull();
+  });
+
+  it("renders saved resolved incidents", async () => {
+    getResolvedIncidents.mockResolvedValue([
+      {
+        incidentId: "INC-99",
+        category: "Medical",
+        status: "Resolved",
+        timestamp: "2026-10-08T00:00:00.000Z",
+        location: { address: "Barangka" },
+      },
+    ]);
+
+    await render(<ResolvedLog onBack={jest.fn()} onSelect={jest.fn()} />);
+
+    expect(await screen.findByText("INC-99")).toBeTruthy();
+    expect(screen.queryByTestId("resolved-skeleton")).toBeNull();
+    expect(screen.queryByText("No Recent History")).toBeNull();
+  });
+});

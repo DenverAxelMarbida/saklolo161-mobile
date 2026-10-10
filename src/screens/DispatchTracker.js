@@ -321,6 +321,14 @@ export default function DispatchTracker({
     routeState && routeState.incidentId === incidentId
       ? routeState.coords
       : null;
+  // Pending = inputs are ready but this incident's route hasn't landed
+  // yet (either still in flight or about to start). Derived, not state,
+  // so no stale flags survive an incident switch.
+  const routeInputsReady =
+    !!stationCoords && incidentLat != null && incidentLng != null;
+  const routePending =
+    routeInputsReady &&
+    (!routeState || routeState.incidentId !== incidentId);
 
   // Arrival ETA has two sources with the same meaning (driving time from
   // GET /api/routes): the live route fetch (freshest, matches the web
@@ -341,7 +349,7 @@ export default function DispatchTracker({
 
   useEffect(() => {
     if (!stationCoords || incidentLat == null || incidentLng == null) {
-      return;
+      return undefined;
     }
     let cancelled = false;
     const fallback = [
@@ -550,7 +558,12 @@ export default function DispatchTracker({
 
       {showList ? (
         listLoading ? (
-          <View style={styles.loadingContainer}>
+          <View
+            style={styles.loadingContainer}
+            testID="picker-loading"
+            accessibilityLabel="Loading recent reports"
+            accessible
+          >
             <ActivityIndicator color={THEMES.mintGreen} size="large" />
             <Text style={styles.loadingText}>Loading your reports...</Text>
           </View>
@@ -793,91 +806,105 @@ export default function DispatchTracker({
 
           {liveIncident && (
             <View style={styles.trackerBody}>
-              {MAPBOX_TOKEN && MapView ? (
-                <View style={styles.mapSection}>
-                  <MapView
-                    style={styles.heroMap}
-                    styleURL="mapbox://styles/mapbox/streets-v12"
-                    scrollEnabled={true}
-                    pitchEnabled={true}
-                    rotateEnabled={true}
-                    compassEnabled={true}
-                    requestDisallowInterceptTouchEvent={true}
-                  >
-                    {MapboxCamera && (
-                      <MapboxCamera
-                        ref={cameraRef}
-                        defaultSettings={cameraDefaults}
-                      />
-                    )}
-                    {ShapeSource &&
-                      LineLayer &&
-                      routeCoords &&
-                      stationCoords && (
-                      <ShapeSource
-                        id="routeSource"
-                        shape={{
-                          type: "Feature",
-                          properties: {},
-                          geometry: {
-                            type: "LineString",
-                            coordinates: routeCoords,
-                          },
-                        }}
-                      >
-                        <LineLayer
-                          id="routeLine"
-                          style={{
-                            lineColor: "#2f80ed",
-                            lineWidth: 3,
-                            lineDasharray: [0.5, 1.5],
-                            lineCap: "round",
-                            lineJoin: "round",
-                          }}
+              <View>
+                {MAPBOX_TOKEN && MapView ? (
+                  <View style={styles.mapSection}>
+                    <MapView
+                      style={styles.heroMap}
+                      styleURL="mapbox://styles/mapbox/streets-v12"
+                      scrollEnabled={true}
+                      pitchEnabled={true}
+                      rotateEnabled={true}
+                      compassEnabled={true}
+                      requestDisallowInterceptTouchEvent={true}
+                    >
+                      {MapboxCamera && (
+                        <MapboxCamera
+                          ref={cameraRef}
+                          defaultSettings={cameraDefaults}
                         />
-                      </ShapeSource>
-                    )}
-                    {PointAnnotation && stationCoords && (
-                      <PointAnnotation
-                        id="station-location"
-                        coordinate={[stationCoords.lng, stationCoords.lat]}
-                        anchor={{ x: 0.5, y: 0.5 }}
-                      >
-                        <View style={styles.pinWrap}>
-                          <View style={styles.stationPin} />
-                        </View>
-                      </PointAnnotation>
-                    )}
-                    {PointAnnotation && (
-                      <PointAnnotation
-                        id="incident-location"
-                        coordinate={[
-                          liveIncident.location.longitude,
-                          liveIncident.location.latitude,
-                        ]}
-                        anchor={{ x: 0.5, y: 0.5 }}
-                      >
-                        <View style={styles.pinWrap}>
-                          <View style={styles.incidentPin} />
-                        </View>
-                      </PointAnnotation>
-                    )}
-                  </MapView>
-                  <View style={styles.addressOverlay} pointerEvents="none">
-                    <MapPin size={13} color={THEMES.floodBlue} />
-                    <Text style={styles.addressText} numberOfLines={1}>
+                      )}
+                      {ShapeSource &&
+                        LineLayer &&
+                        routeCoords &&
+                        stationCoords && (
+                        <ShapeSource
+                          id="routeSource"
+                          shape={{
+                            type: "Feature",
+                            properties: {},
+                            geometry: {
+                              type: "LineString",
+                              coordinates: routeCoords,
+                            },
+                          }}
+                        >
+                          <LineLayer
+                            id="routeLine"
+                            style={{
+                              lineColor: "#2f80ed",
+                              lineWidth: 3,
+                              lineDasharray: [0.5, 1.5],
+                              lineCap: "round",
+                              lineJoin: "round",
+                            }}
+                          />
+                        </ShapeSource>
+                      )}
+                      {PointAnnotation && stationCoords && (
+                        <PointAnnotation
+                          id="station-location"
+                          coordinate={[stationCoords.lng, stationCoords.lat]}
+                          anchor={{ x: 0.5, y: 0.5 }}
+                        >
+                          <View style={styles.pinWrap}>
+                            <View style={styles.stationPin} />
+                          </View>
+                        </PointAnnotation>
+                      )}
+                      {PointAnnotation && (
+                        <PointAnnotation
+                          id="incident-location"
+                          coordinate={[
+                            liveIncident.location.longitude,
+                            liveIncident.location.latitude,
+                          ]}
+                          anchor={{ x: 0.5, y: 0.5 }}
+                        >
+                          <View style={styles.pinWrap}>
+                            <View style={styles.incidentPin} />
+                          </View>
+                        </PointAnnotation>
+                      )}
+                    </MapView>
+                    <View style={styles.addressOverlay} pointerEvents="none">
+                      <MapPin size={13} color={THEMES.floodBlue} />
+                      <Text style={styles.addressText} numberOfLines={1}>
+                        {liveIncident.location.address}
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.placeholderSection}>
+                    <MapPin size={28} color={THEMES.mintGreen} />
+                    <Text style={styles.placeholderText}>
                       {liveIncident.location.address}
                     </Text>
                   </View>
-                </View>
-              ) : (
-                <View style={styles.placeholderSection}>
-                  <MapPin size={28} color={THEMES.mintGreen} />
-                  <Text style={styles.placeholderText}>
-                    {liveIncident.location.address}
-                  </Text>
-                </View>
-              )}
+                )}
+                {routePending && (
+                  <View
+                    style={styles.routeChip}
+                    testID="route-chip"
+                    accessible
+                    accessibilityLabel="Calculating route"
+                  >
+                    <Text style={styles.routeChipText}>
+                      Calculating route…
+                    </Text>
+                  </View>
+                )}
+              </View>
 
               <ScrollView
                 testID="track-detail-scroll"
@@ -1459,6 +1486,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: LIGHT.textSecondary,
     textAlign: "center",
+  },
+  routeChip: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    zIndex: 10,
+    elevation: 5,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: LIGHT.border,
+  },
+  routeChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: LIGHT.textPrimary,
   },
   listContent: {
     padding: 16,
