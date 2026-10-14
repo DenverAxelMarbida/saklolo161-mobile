@@ -565,3 +565,211 @@ describe("ResolvedLog loading states", () => {
     expect(screen.queryByText("No Recent History")).toBeNull();
   });
 });
+
+describe("ResolvedLog — category filter and Incident ID search", () => {
+  const FIRE_A = makeResolved({
+    incidentId: "INC-FA",
+    category: "Fire",
+    resolvedAt: "2026-10-06T00:00:00.000Z",
+  });
+  // Case variant of "Fire" — must collapse into the SAME chip and
+  // match the same category selection.
+  const FIRE_B = makeResolved({
+    incidentId: "INC-FB",
+    category: "fire",
+    resolvedAt: "2026-10-05T00:00:00.000Z",
+  });
+  const MED = makeResolved({
+    incidentId: "INC-MED",
+    category: "Medical",
+    resolvedAt: "2026-10-04T00:00:00.000Z",
+  });
+
+  async function renderHistory(data = [FIRE_A, FIRE_B, MED]) {
+    getResolvedIncidents.mockResolvedValue(data);
+    await render(<ResolvedLog onBack={jest.fn()} onSelect={jest.fn()} />);
+    // Present in every loaded state (chips only render when there is
+    // history; the empty state hides the filter bar by design).
+    await screen.findByTestId("history-scroll");
+  }
+
+  it("shows every incident by default and builds chips from actual data", async () => {
+    await renderHistory();
+
+    expect(await screen.findByText("INC-FA")).toBeTruthy();
+    expect(screen.getByText("INC-FB")).toBeTruthy();
+    expect(screen.getByText("INC-MED")).toBeTruthy();
+
+    expect(screen.getByTestId("history-category-all")).toBeTruthy();
+    expect(screen.getByTestId("history-category-fire")).toBeTruthy();
+    expect(screen.getByTestId("history-category-medical")).toBeTruthy();
+    // "Fire" and "fire" collapse into one chip, keyed by the normalized value.
+    expect(screen.getAllByTestId("history-category-fire")).toHaveLength(1);
+    // All Categories is the default active chip.
+    expect(
+      screen.getByTestId("history-category-all").props.accessibilityState
+        .selected
+    ).toBe(true);
+  });
+
+  it("hides the filter bar when history is empty", async () => {
+    await renderHistory([]);
+
+    expect(await screen.findByTestId("history-empty-state")).toBeTruthy();
+    expect(screen.queryByTestId("history-search-input")).toBeNull();
+    expect(screen.queryByTestId("history-category-all")).toBeNull();
+  });
+
+  it("selecting a category shows only incidents in that category, case-insensitively", async () => {
+    await renderHistory();
+
+    await fireEvent.press(screen.getByTestId("history-category-fire"));
+
+    expect(screen.getByText("INC-FA")).toBeTruthy();
+    expect(screen.getByText("INC-FB")).toBeTruthy();
+    expect(screen.queryByText("INC-MED")).toBeNull();
+    expect(screen.queryByTestId("history-no-results")).toBeNull();
+    expect(
+      screen.getByTestId("history-category-fire").props.accessibilityState
+        .selected
+    ).toBe(true);
+  });
+
+  it("combines Incident ID search with the selected category", async () => {
+    await renderHistory();
+
+    await fireEvent.press(screen.getByTestId("history-category-fire"));
+    // Search matches nothing inside the Fire category -> no-results state.
+    await fireEvent.changeText(
+      screen.getByTestId("history-search-input"),
+      "INC-MED"
+    );
+    expect(screen.getByTestId("history-no-results")).toBeTruthy();
+    expect(screen.queryByText("INC-MED")).toBeNull();
+    expect(screen.queryByText("INC-FA")).toBeNull();
+
+    // Case-insensitive + partial match keeps both Fire incidents.
+    await fireEvent.changeText(
+      screen.getByTestId("history-search-input"),
+      "inc-f"
+    );
+    expect(screen.getByText("INC-FA")).toBeTruthy();
+    expect(screen.getByText("INC-FB")).toBeTruthy();
+    expect(screen.queryByText("INC-MED")).toBeNull();
+    expect(screen.queryByTestId("history-no-results")).toBeNull();
+
+    // Surrounding whitespace is trimmed before matching.
+    await fireEvent.changeText(
+      screen.getByTestId("history-search-input"),
+      "  INC-FA  "
+    );
+    expect(screen.getByText("INC-FA")).toBeTruthy();
+    expect(screen.queryByText("INC-FB")).toBeNull();
+  });
+
+  it("clearing the search preserves the selected category", async () => {
+    await renderHistory();
+
+    await fireEvent.press(screen.getByTestId("history-category-fire"));
+    await fireEvent.changeText(
+      screen.getByTestId("history-search-input"),
+      "zzz"
+    );
+    expect(screen.getByTestId("history-no-results")).toBeTruthy();
+
+    await fireEvent.changeText(screen.getByTestId("history-search-input"), "");
+    expect(screen.queryByTestId("history-no-results")).toBeNull();
+    expect(screen.getByText("INC-FA")).toBeTruthy();
+    expect(screen.getByText("INC-FB")).toBeTruthy();
+    // Category selection survived the search clear.
+    expect(screen.queryByText("INC-MED")).toBeNull();
+    expect(
+      screen.getByTestId("history-category-fire").props.accessibilityState
+        .selected
+    ).toBe(true);
+  });
+
+  it("Reset restores the complete list and clears both filters", async () => {
+    await renderHistory();
+
+    await fireEvent.press(screen.getByTestId("history-category-medical"));
+    await fireEvent.changeText(
+      screen.getByTestId("history-search-input"),
+      "zzz"
+    );
+    expect(screen.getByTestId("history-no-results")).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId("history-reset-filters"));
+
+    expect(screen.getByText("INC-FA")).toBeTruthy();
+    expect(screen.getByText("INC-FB")).toBeTruthy();
+    expect(screen.getByText("INC-MED")).toBeTruthy();
+    expect(screen.getByTestId("history-search-input").props.value).toBe("");
+    expect(
+      screen.getByTestId("history-category-all").props.accessibilityState
+        .selected
+    ).toBe(true);
+    expect(
+      screen.getByTestId("history-category-medical").props.accessibilityState
+        .selected
+    ).toBe(false);
+  });
+
+  it("shows the no-results state when the selected category matches nothing after refresh", async () => {
+    await renderHistory([FIRE_A, MED]);
+    await fireEvent.press(screen.getByTestId("history-category-medical"));
+    expect(screen.getByText("INC-MED")).toBeTruthy();
+
+    // Refresh replaces history with data that lacks the selected category.
+    // The selection persists; the chip set rebuilds from the new data.
+    getResolvedIncidents.mockResolvedValue([FIRE_A, FIRE_B]);
+    await act(async () => {
+      await screen
+        .getByTestId("history-scroll")
+        .props.refreshControl.props.onRefresh();
+    });
+
+    expect(screen.getByTestId("history-no-results")).toBeTruthy();
+    expect(screen.queryByText("INC-MED")).toBeNull();
+    expect(screen.queryByText("INC-FA")).toBeNull();
+    // No medical chip in the rebuilt chip set, but selection persists.
+    expect(screen.queryByTestId("history-category-medical")).toBeNull();
+    expect(screen.queryByTestId("history-empty-state")).toBeNull();
+  });
+
+  it("keeps incident navigation unchanged for a filtered card", async () => {
+    const onSelect = jest.fn();
+    getResolvedIncidents.mockResolvedValue([FIRE_A, FIRE_B, MED]);
+    await render(<ResolvedLog onBack={jest.fn()} onSelect={onSelect} />);
+    await screen.findByTestId("history-scroll");
+
+    await fireEvent.press(screen.getByTestId("history-category-fire"));
+    await fireEvent.press(screen.getByTestId("history-card-INC-FA"));
+
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ incidentId: "INC-FA" })
+    );
+  });
+
+  it("filters in memory without extra storage reads or network calls", async () => {
+    await renderHistory();
+    expect(getResolvedIncidents).toHaveBeenCalledTimes(1);
+
+    await fireEvent.changeText(
+      screen.getByTestId("history-search-input"),
+      "INC-FA"
+    );
+    await fireEvent.press(screen.getByTestId("history-category-medical"));
+    await fireEvent.press(screen.getByTestId("history-category-fire"));
+    await fireEvent.changeText(
+      screen.getByTestId("history-search-input"),
+      ""
+    );
+    await fireEvent.press(screen.getByTestId("history-reset-filters"));
+
+    expect(screen.getByText("INC-MED")).toBeTruthy();
+    expect(getResolvedIncidents).toHaveBeenCalledTimes(1);
+    expect(axios.get).not.toHaveBeenCalled();
+  });
+});
